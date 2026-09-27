@@ -121,9 +121,11 @@ PYTHONPATH=. .venv/bin/python scripts/body_brain_loop.py --duration 200 --video 
 PYTHONPATH=. .venv/bin/pytest tests
 ```
 
-État : elle tient debout ; les muscles scriptés la font avancer ; en boucle fermée DNg100 (2 neurones
-descendants « marche ») recrute ~130/391 motoneurones de patte à ~15 Hz, sans emballement, dans le
-régime calibré `banc.CALIBRATED` (voir `docs/calibration.md` : signes GABA/glutamate/histamine vérifiés,
-afférents clampés, normalisation par la taille). Elle ne marche pas encore : le rythme de pas et le
-principe de taille des motoneurones restent à obtenir (`scripts/banc_calibrate.py`,
-`scripts/banc_walk_analysis.py`).
+État : elle tient debout ; les muscles scriptés la font avancer ; tous les afférents annotés du BANC
+sont branchés au corps (`docs/capteurs.md`). Régime `banc.CALIBRATED_V2` (`docs/calibration.md` § 5 :
+paramètres de Shiu 2024, signes GABA/glutamate/histamine vérifiés, afférents clampés, synapses
+eLN → PN électriques atténuées, dépression ORN → PN) : avec tous les capteurs actifs le cerveau reste
+stable (fond ~0 Hz hors lobe antennaire, cellules de Kenyon muettes au repos) et les neurones descendants
+« marche » recrutent les motoneurones de patte, mais faiblement (1–3 Hz). Elle ne marche pas encore : le
+gain DN → MN et le rythme de pas restent à obtenir dans le ganglion ventral (`scripts/banc_al_gain.py`,
+`scripts/banc_calibrate.py`, `scripts/banc_walk_analysis.py`).

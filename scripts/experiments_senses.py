@@ -42,8 +42,8 @@ def side_rates(sim: BodyBrainSim, ms: float, mask: np.ndarray) -> dict:
     return out
 
 
-PARAMS = {"calibrated": banc.CALIBRATED, "senses": banc.SENSES}
-CHOSEN = ["senses"]
+PARAMS = {"v2": banc.CALIBRATED_V2, "calibrated": banc.CALIBRATED}
+CHOSEN = ["v2"]
 
 
 def run(env: Environment | None, ms: float, vision: bool = False, extra_xml: str = "", **kw) -> BodyBrainSim:
@@ -127,7 +127,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("which", nargs="?", default="all")
     ap.add_argument("--ms", type=float, default=300.0)
-    ap.add_argument("--params", choices=sorted(PARAMS), default="senses")
+    ap.add_argument("--params", choices=sorted(PARAMS), default="v2")
     a = ap.parse_args()
     CHOSEN[0] = a.params
     exps = {"posture": exp_posture, "vision": exp_vision, "odor": exp_odor, "taste": exp_taste, "wind": exp_wind}

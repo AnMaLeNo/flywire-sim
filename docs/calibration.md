@@ -83,3 +83,107 @@ Régime retenu (`banc.CALIBRATED` : w = 2,0, γ = 0,5) :
 - **Muscle** : activation générique (τ 30 ms, +0,05/spike) ; force par spike, twitch de 8,5 ms et
   saturation à ~10 spikes par classe de MN restent à implémenter.
 - Pas de marche en boucle fermée : déplacement 0,13 mm en 1 s.
+
+## 5. Deuxième passe (ciblée) : afférents actifs, lobe antennaire, corps pédonculé
+
+Constat de départ (capteurs v1, PR #3) : avec `CALIBRATED` (w = 2, γ = 0,5) le seul bruit spontané des
+afférents embrase le cerveau entier. Méthode imposée : (a) vérifier d'abord que les capteurs et le corps
+n'introduisent pas de signal faux, (b) localiser l'étage responsable par élimination, (c) confronter à la
+littérature, (d) ne toucher qu'à des grandeurs dont la valeur réelle est incertaine, jamais au nombre de
+neurones ni au support des connexions (`tests/test_calibration.py` vérifie que le support de la matrice
+est inchangé). Outil : `scripts/banc_al_gain.py` (paramètres, dépression, gain eLN, DN stimulés, odeur,
+ablation de groupes de capteurs, taux par population et par fenêtre de 100 ms).
+
+### 5.1 Audit des capteurs (côté corps)
+
+- Effectifs BANC re-comptés depuis les annotations officielles (`banc.antennal_lobe_populations`) :
+  ORN 3 006 (2 811 antennes, 195 palpes), PN 699, LN 429 (eLN 123 / iLN 306 d'après le signe NT ; les
+  eLN sont en majorité `nt_verified = acetylcholine`, les iLN GABA/glutamate), KC 4 553, MBON 104.
+- Taux spontanés forcés : ORN 8 Hz (de Bruyne 2001), hygro/thermo 3 Hz toniques, soies phasico-toniques,
+  chordotonaux ~10 Hz au repos. Sans aucun canal actif : 0 spike dans tout le réseau (pas de fuite).
+- Bug corrigé : les 35 cellules `Ir40a,cooling` du sacculus (glomérules VP1d/VP1l) étaient pilotées
+  comme des cellules « sèches » toniques. Frank et al. 2017 : la triade hygrosensorielle comprend une
+  cellule sèche (Ir40a, VP4), une cellule **froide** (Ir40a, VP1) et une cellule humide (Ir68a, VP5) ;
+  elles reçoivent maintenant −dT/dt (canal `hygro_cooling`).
+- Tactile tarsal séparé par tarsomère (`tactile1..5`, contact réel du tarsomère), vibro-chordotonaux (`club`)
+  et `ppk23` (phéromone de contact) branchés ; test : chaque canal ne tire que si son tarsomère touche.
+
+### 5.2 Localisation par élimination (500 ms, mouche posée)
+
+| Capteurs actifs | Paramètres | Total (spk/s) | PN | KC | DN | MN patte |
+|---|---|---|---|---|---|---|
+| aucun | CALIBRATED | 0 | 0 | 0 | 0 | 0 |
+| ORN seuls (3 006) | CALIBRATED | 1 871 000 (croissant) | 158 | 160 | 26 | 5,8 |
+| hygro/thermo seuls (121) | CALIBRATED | 1 860 000 (croissant) | 151 | 151 | 25 | 4,0 |
+| soies, JO, labellum, propriocepteurs (~9 000) | CALIBRATED_V2 | 14 400 (décroissant) | 0 | 0 | 0 | 0 |
+| hygro/thermo seuls | CALIBRATED_V2 | 10 800 | 2,0 | 0 | 0,2 | 0,4 |
+| ORN seuls | CALIBRATED_V2 | 30 100 | 1,5 | 0 | 0 | 0 |
+| tous | CALIBRATED_V2 | 49 200 | 2,5 | 0 | 0,2 | 0,3 |
+
+(CALIBRATED_V2 inclut les mécanismes de § 5.3 ; fichiers `results/al_gain_*.txt`.)
+
+Conclusions : (1) le corps et les mécanorécepteurs ne sont pas en cause (pas de propagation au-delà du
+premier relais) ; (2) l'entrée qui embrase est le **lobe antennaire** (ORN, ou même les seuls 121 hygro/thermo à 3 Hz :
+leurs 41 000 synapses sortantes ciblent PN et LN), puis PN → KC → tout le cerveau ; (3) l'embrasement
+n'existe qu'avec le gain global de `CALIBRATED` (w × 7 par rapport à Shiu) : avec les paramètres de
+Shiu et al. 2024 les mêmes entrées ne se propagent pas. `CALIBRATED` avait été réglé pour compenser un
+défaut situé ailleurs (DN → MN trop faible, § 4) en amplifiant tout le cerveau : c'est ce réglage global
+qui est fautif, pas les capteurs.
+
+### 5.3 Mécanismes retenus (littérature) et grandeurs réglées
+
+Le LIF homogène n'a ni synapses électriques ni dépression ; les deux sont documentés précisément dans le
+lobe antennaire et réglés **par type de neurone / de synapse annoté**, sans changer le support :
+
+1. **eLN → PN et eLN → eLN sont électriques** (Yaksi & Wilson 2010 : transmission bidirectionnelle,
+   insensible au Cd²⁺, abolie par `shakB²` ; les coefficients de couplage mesurés au soma sont faibles ;
+   Huang 2010). Le BANC les compte comme synapses chimiques et le simulateur les traitait comme des
+   synapses excitatrices pleines, d'où eLN à 320 Hz et PN à 100 Hz spontanés (Shiu, sans dépression).
+   Réglage : efficacité `ELN_ELECTRICAL_GAIN` sur ces seules sorties (`banc.synaptic_efficacy`).
+   Balayage (Shiu, U_ORN = 0,5) : gain 1 → PN 104 Hz, KC 36 Hz ; 0,5 → PN 52, KC 13 ; 0,25 → PN 15, KC
+   0,7 ; 0,1 → PN 3–4, KC 0. Retenu 0,1 (le seul qui ramène les KC spontanées à ~0 Hz, Turner 2008) ;
+   la valeur réelle du couplage est inconnue → paramètre explicitement incertain.
+2. **Dépression ORN → PN** (Kazama & Wilson 2008 : probabilité de libération élevée, ~40 % de dépression
+   déjà à 7 Hz, réponses PN transitoires). Modèle Tsodyks-Markram par neurone présynaptique
+   (`LIFNetwork(std_U=vecteur)`), U ≠ 0 seulement pour les ORN (`banc.depression_U`). Balayage (odeur
+   « levure », ORN à 80 Hz, PN cibles par fenêtre de 100 ms, début → régime) :
+   U = 0 : 75 → 55 Hz ; U = 0,15/τ 200 ms : 46 → 16 ; U = 0,3/τ 200 : 30 → 8 ; U = 0,5/τ 200 : 19 → 5.
+   Retenu **U = 0,3, τ_rec = 200 ms** : dépression ~30 % à 8 Hz (Kazama : ~40 %, dont une part
+   d'inhibition présynaptique non modélisée), réponse PN transitoire (×3,7 début/régime).
+3. Paramètres globaux : retour à Shiu et al. 2024 (`CALIBRATED_V2 = LIFParams(tau_rec=200)`), qui
+   reproduit une activité spontanée de base ~0 Hz hors afférents.
+
+Non implémentés (documentés) : inhibition présynaptique GABA-B des terminaisons ORN (Olsen & Wilson 2008,
+Root 2008), seuil KC / rétroaction APL (Lin 2014), hétérogénéité intrinsèque des LN (Seki 2010).
+
+### 5.4 Résultats avec tous les capteurs actifs (CALIBRATED_V2, U = 0,3, τ 200 ms, gain eLN 0,1)
+
+| Condition | Total (spk/s) | ORN | PN | eLN | iLN | KC | DN | MN patte |
+|---|---|---|---|---|---|---|---|---|
+| spontané | 49 000 | 7,9 | 2,5 | 28 | 9 | 0 | 0,2 | 0,3 |
+| DNg100 à 50 Hz | 58 000 | 7,8 | 3,7 | 38 | 12 | 0 | 0,4 | 1,4 (13 % actifs) |
+| 20 types DN « marche » à 50 Hz | 148 000 (stable sur 500 ms) | 7,9 | 3,0 | 34 | 10 | 0 | 9,9 | 2,7 (20 % actifs) |
+| odeur levure (ORN cibles 80 Hz) | 99 000 | 21,6 | 4,0 (levure 30 → 8) | 56 | 15 | 0,2 | 0,2 | 0,4 |
+| comparaison : CALIBRATED + mêmes mécanismes, DNg100 | 496 000 et croissant | 7,8 | 8,9 | 47 | 20 | 3,6 | 16,8 | 4,9 |
+
+Stable, sans emballement, activité de fond ~0 Hz hors afférents et lobe antennaire ; le corps pédonculé
+est silencieux au repos et répond faiblement à l'odeur (KC 0,2 Hz ; in vivo : réponses clairsemées de
+quelques KC). Le recrutement DN → MN est réel mais faible (MN à 1–3 Hz, 13–20 % actifs) : c'est le
+problème de § 4 (gain DN → MN dans le ganglion ventral, propriétés intrinsèques des MN), à traiter
+**dans le VNC** et non par un gain global — c'est exactement l'erreur de la v1.
+
+### 5.5 Ce qui reste incertain
+
+- Le gain eLN 0,1 et U = 0,3 sont des grandeurs incertaines réglées sur des cibles qualitatives
+  (KC ~0 Hz au repos, PN transitoires) ; ils devront être revus si l'inhibition présynaptique GABA-B ou
+  l'APL sont implémentées.
+- La dépression s'applique à toutes les sorties des ORN (dont ORN → LN), pas seulement à ORN → PN.
+- Les hygro/thermorécepteurs à 3 Hz toniques dominent l'activité de fond du lobe (canal VP) : valeur à
+  confronter à des enregistrements (Enjin 2016 n'en donne pas de taux au repos).
+- La réponse PN à l'odeur (30 Hz début) est faible par rapport à in vivo (100–200 Hz, Bhandawat 2007) :
+  la force unitaire ORN → PN de Shiu (w = 0,275 par synapse) est probablement sous-estimée pour cette
+  synapse « très forte » (Kazama & Wilson) ; à régler par type de synapse, pas globalement.
+- La classe `mushroom_body_extrinsic_neuron` (4 neurones, dont les 2 APL) tire à ~30 Hz au repos : ce sont
+  les APL (GABA vérifié), excitées par leurs entrées non-KC. In vivo l'APL est **non impulsionnelle**
+  (Papadopoulou 2011, potentiels gradués) ; en LIF ses spikes ne font qu'inhiber les KC (sens conservé),
+  mais elle devra passer en neurone gradué comme les photorécepteurs quand l'APL sera traitée.

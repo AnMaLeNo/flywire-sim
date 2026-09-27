@@ -11,7 +11,6 @@ de toute façon des muscles, hors du réseau.
 import gzip
 import pickle
 import re
-from dataclasses import replace
 
 import numpy as np
 import pandas as pd
@@ -27,11 +26,66 @@ BANC = data.RAW / "banc888"
 # ~100/391 MN de patte à 10-35 Hz (médiane ~20 Hz, cf. MN lents ~30 Hz, Azevedo et al. 2020), le VNC
 # reste stable (~3000 neurones actifs, ~35 Hz) sans emballement du cerveau.
 CALIBRATED = LIFParams(w_syn=2.0, size_norm=0.5)
-# Régime provisoire pour les expériences sensorielles (docs/capteurs.md § 5) : avec l'activité spontanée
-# des afférents (ORN ~8 Hz, hygro/thermo toniques), CALIBRATED embrase lobe antennaire -> corps pédonculé ->
-# tout le cerveau ; la dépression synaptique (Kazama & Wilson 2008 : ORN->PN fortement dépressives) le
-# stabilise (PN ~26 Hz, KC ~11 Hz, DN ~1 Hz) au prix d'un recrutement DNg100 -> MN plus faible.
-SENSES = replace(CALIBRATED, std_U=0.2, tau_rec=500.0)
+# CALIBRATED (PR #2, « v1 ») avait été réglé sur DNg100 -> MN avec afférents silencieux. Dès que les capteurs
+# tirent (ORN ~8 Hz, hygro/thermo toniques), son gain global (w x7 par rapport à Shiu) embrase le cerveau
+# entier ; la 2e passe (docs/calibration.md § 5) revient aux paramètres de Shiu et al. 2024 et n'ajoute que
+# des mécanismes spécifiques du lobe antennaire (ci-dessous). Le gain DN -> MN devra être traité dans le
+# ganglion ventral lui-même (propriétés des MN), pas par un gain global.
+CALIBRATED_V2 = LIFParams(tau_rec=200.0)
+
+# Mécanismes spécifiques du lobe antennaire (docs/calibration.md § 2e passe). Ils ne touchent ni aux
+# neurones ni aux connexions du BANC : seule l'efficacité par spike de certaines synapses change.
+#  - Dépression à court terme des terminaisons ORN (Kazama & Wilson 2008 : probabilité de libération
+#    élevée, uEPSC déjà réduit de ~40 % à la fréquence spontanée (7 Hz), dépression forte et rapide pendant les
+#    trains odorants). Tsodyks-Markram par neurone présynaptique : fraction U libérée par spike, récupération
+#    en ORN_TAU_REC (= tau_rec des paramètres LIF) ; à 8 Hz spontanés x_ss = 1/(1+U·f·tau) ~ 0.7 (Kazama & Wilson 2008 : ~40 % de dépression à 7 Hz), à 80 Hz ~ 0.17.
+ORN_STD_U = 0.3
+ORN_TAU_REC = CALIBRATED_V2.tau_rec
+#  - Les LN excitateurs (eLN, cholinergiques) excitent les PN (et les autres eLN) par jonctions électriques,
+#    pas par transmission chimique (Yaksi & Wilson 2010 : insensible au Cd2+, aboli par shakB2 ;
+#    Huang et al. 2010 : couplage eLN-PN et eLN-eLN). Un spike d'eLN (~40 mV, souvent atténué à ~10 mV)
+#    ne transmet au PN qu'une fraction (coefficient de couplage << 1) ; les synapses eLN -> LN inhibiteurs
+#    restent chimiques et inchangées. ELN_ELECTRICAL_GAIN est le facteur appliqué au nombre de synapses
+#    eLN -> PN/eLN ; sa valeur n'est pas mesurée dans la littérature (paramètre incertain, calibré).
+ELN_ELECTRICAL_GAIN = 0.1
+
+
+def antennal_lobe_populations(neurons: pd.DataFrame, sign: np.ndarray) -> dict[str, np.ndarray]:
+    """Indices des ORN, PN, LN excitateurs (eLN) et inhibiteurs (iLN) du lobe antennaire d'après les
+    annotations officielles (`cls`) et le signe déduit des neurotransmetteurs (ACh -> eLN)."""
+    cls = neurons.cls.to_numpy()
+    ln = cls == "antennal_lobe_local_neuron"
+    return {
+        "ORN": np.flatnonzero(cls == "olfactory_receptor_neuron"),
+        "PN": np.flatnonzero(cls == "antennal_lobe_projection_neuron"),
+        "eLN": np.flatnonzero(ln & (sign > 0)),
+        "iLN": np.flatnonzero(ln & (sign < 0)),
+    }
+
+
+def depression_U(neurons: pd.DataFrame, orn_U: float = ORN_STD_U) -> np.ndarray:
+    """Fraction de ressources libérée par spike, par neurone présynaptique : `orn_U` pour les ORN, 0 ailleurs."""
+    U = np.zeros(len(neurons), dtype=np.float32)
+    U[neurons.cls.to_numpy() == "olfactory_receptor_neuron"] = orn_U
+    return U
+
+
+def synaptic_efficacy(W: sp.csc_matrix, neurons: pd.DataFrame, sign: np.ndarray,
+                      eln_gain: float = ELN_ELECTRICAL_GAIN) -> sp.csc_matrix:
+    """Pondère les synapses eLN -> PN et eLN -> eLN (électriques) par `eln_gain` ; les autres sont
+    inchangées. Retourne une nouvelle matrice (même support de connexions)."""
+    pops = antennal_lobe_populations(neurons, sign)
+    W = W.tocsc(copy=True)
+    W.eliminate_zeros()
+    src = pops["eLN"]
+    dst = np.zeros(W.shape[0], dtype=bool)
+    dst[pops["PN"]] = True
+    dst[pops["eLN"]] = True
+    for j in src:
+        a, b = W.indptr[j], W.indptr[j + 1]
+        rows = W.indices[a:b]
+        W.data[a:b][dst[rows]] *= eln_gain
+    return W
 
 
 def load_neurons() -> pd.DataFrame:
