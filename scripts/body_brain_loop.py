@@ -3,6 +3,7 @@ descendants « marche » et observe les motoneurones, les muscles et le déplace
 import argparse
 import os
 import subprocess
+from dataclasses import replace
 
 os.environ.setdefault("MUJOCO_GL", "egl")
 import mujoco
@@ -11,7 +12,6 @@ from PIL import Image
 
 from flywire_sim import banc, data
 from flywire_sim.body.sim import BodyBrainSim
-from flywire_sim.lif import LIFParams
 
 # population « marche » large (Pugliese et al. 2025 ; Cheong et al. 2024) ; par défaut on stimule DNg100 seul
 WALK_DN = ["DNp09", "DNa01", "DNa02", "DNa03", "DNa04", "DNa05", "DNa06", "DNa07", "DNb01", "DNb02", "DNb05",
@@ -21,15 +21,17 @@ ap = argparse.ArgumentParser()
 ap.add_argument("--duration", type=float, default=300.0, help="ms")
 ap.add_argument("--rate", type=float, default=50.0, help="Hz de stimulation des DN")
 ap.add_argument("--dn", nargs="+", default=["DNg100"], help="types de DN stimulés ('walk' = population large)")
-ap.add_argument("--w", type=float, default=banc.CALIBRATED.w_syn)
-ap.add_argument("--gamma", type=float, default=banc.CALIBRATED.size_norm)
-ap.add_argument("--adapt", type=float, default=banc.CALIBRATED.adapt_b)
+ap.add_argument("--w", type=float, default=banc.CALIBRATED_V2.w_syn, help="mV par synapse (défaut : CALIBRATED_V2)")
+ap.add_argument("--gamma", type=float, default=banc.CALIBRATED_V2.size_norm)
+ap.add_argument("--adapt", type=float, default=banc.CALIBRATED_V2.adapt_b)
+ap.add_argument("--no-completeness", action="store_true", help="sans correction de complétude de la moelle")
 ap.add_argument("--no-stim", action="store_true")
 ap.add_argument("--video", action="store_true")
 ap.add_argument("--out", default="body_brain_loop")
 args = ap.parse_args()
 
-sim = BodyBrainSim(LIFParams(w_syn=args.w, size_norm=args.gamma, adapt_b=args.adapt))
+sim = BodyBrainSim(replace(banc.CALIBRATED_V2, w_syn=args.w, size_norm=args.gamma, adapt_b=args.adapt),
+                   completeness_correction=not args.no_completeness)
 print(f"réseau : {sim.net.W.shape[0]} neurones ; MN de patte reliés aux muscles : {sim.mmap.mn_idx.size} "
       f"({sim.mmap.unmapped.shape[0]} non reliés : {sim.mmap.unmapped.cell_type.value_counts().to_dict()})")
 s = sim.senses.summary()

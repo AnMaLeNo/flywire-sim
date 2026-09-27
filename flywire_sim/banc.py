@@ -95,6 +95,7 @@ def load_neurons() -> pd.DataFrame:
         "Body Part": "body_part", "Function": "function", "Flow": "flow", "Super Class": "super_class",
         "Class": "cls", "Sub Class": "sub_class", "Nerve": "nerve", "Soma side": "side",
         "Primary Cell Type": "cell_type", "Community labels": "labels", "Top in/out region": "region",
+        "Hemilineage": "hemilineage",
     })
     n["root_id"] = n.root_id.astype(np.int64)
     return n

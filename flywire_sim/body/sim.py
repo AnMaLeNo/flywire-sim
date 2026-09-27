@@ -14,7 +14,7 @@ import mujoco
 import numpy as np
 import pandas as pd
 
-from .. import banc, data
+from .. import banc, completeness, data
 from ..lif import LIFNetwork, LIFParams, LIFStepper
 from ..network import Network
 from .environment import Environment
@@ -57,11 +57,13 @@ class BodyBrainSim:
     def __init__(self, params: LIFParams | None = None, seed: int = 0, sugar: float = 0.0,
                  env: Environment | None = None, vision: bool = False, vision_period_ms: float = 5.0,
                  vision_size: int = 32, extra_xml: str = "", orn_std_u: float = banc.ORN_STD_U,
-                 eln_gain: float = banc.ELN_ELECTRICAL_GAIN):
+                 eln_gain: float = banc.ELN_ELECTRICAL_GAIN, completeness_correction: bool = True):
         self.net, self.neurons = load_banc()
         self.params = params or banc.CALIBRATED_V2
         assert abs(self.params.dt - 0.1) < 1e-9, "dt cerveau = dt physique = 0.1 ms"
         W = banc.clamp_afferents(self.net.W, self.neurons)
+        if completeness_correction:
+            W = completeness.apply(W, self.net.root_ids)
         if eln_gain != 1.0:
             W = banc.synaptic_efficacy(W, self.neurons, self.net.sign, eln_gain)
         self.lif = LIFNetwork(W, self.params, seed=seed, std_U=banc.depression_U(self.neurons, orn_std_u))
