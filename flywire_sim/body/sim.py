@@ -1,10 +1,12 @@
 """Boucle fermée cerveau (BANC, LIF) <-> corps (MuJoCo).
 
 À chaque pas (dt commun = 0.1 ms) :
-  1. capteurs MuJoCo -> grandeurs normalisées -> spikes forcés des neurones sensoriels de patte (senses.py)
+  1. capteurs MuJoCo + environnement -> grandeurs normalisées -> spikes forcés des neurones sensoriels
+     (senses.py) ; toutes les `vision_period_ms` : rendu par œil -> photorécepteurs (vision.py), dont la
+     sortie est injectée en courant (L1-L3) ou en spikes forcés (R7/R8) à chaque pas
   2. un pas de LIF sur le réseau BANC complet (spikes sensoriels forcés + stimulation expérimentale)
   3. spikes des motoneurones de patte -> activation musculaire -> ctrl des actionneurs (muscles.py)
-  4. un pas de MuJoCo
+  4. forces d'environnement (vent, son) sur les antennes, puis un pas de MuJoCo
 """
 from dataclasses import dataclass, field
 
@@ -15,9 +17,11 @@ import pandas as pd
 from .. import banc, data
 from ..lif import LIFNetwork, LIFParams, LIFStepper
 from ..network import Network
+from .environment import Environment
 from .model import LEGS, build_mjcf
 from .muscles import Muscles, build_motor_map
 from .senses import Senses
+from .vision import Eyes, build_retinas
 
 NETWORK_FILE = data.PROCESSED / "network_banc888_min5.npz"
 
@@ -43,20 +47,37 @@ class Trace:
     ctrl: list = field(default_factory=list)
 
 
+# traînée de l'ariste : F = WIND_DRAG x (vent - vitesse) [µN par mm/s] ; 500 mm/s -> ~5° de déviation.
+# Son : force sinusoïdale d'amplitude SOUND_FORCE x env.sound (1 -> ~1° d'oscillation statique équivalente).
+WIND_DRAG = 1.7e-4
+SOUND_FORCE = 0.017
+
+
 class BodyBrainSim:
-    def __init__(self, params: LIFParams | None = None, seed: int = 0, sugar: float = 0.0):
+    def __init__(self, params: LIFParams | None = None, seed: int = 0, sugar: float = 0.0,
+                 env: Environment | None = None, vision: bool = False, vision_period_ms: float = 5.0,
+                 vision_size: int = 32, extra_xml: str = ""):
         self.net, self.neurons = load_banc()
         self.params = params or banc.CALIBRATED
         assert abs(self.params.dt - 0.1) < 1e-9, "dt cerveau = dt physique = 0.1 ms"
         self.lif = LIFNetwork(banc.clamp_afferents(self.net.W, self.neurons), self.params, seed=seed)
         self.stepper: LIFStepper = self.lif.stepper()
-        self.model = mujoco.MjModel.from_xml_string(build_mjcf())
+        self.model = mujoco.MjModel.from_xml_string(build_mjcf(extra_xml=extra_xml))
         assert abs(self.model.opt.timestep * 1000 - self.params.dt) < 1e-9
         self.data = mujoco.MjData(self.model)
         self.mmap = build_motor_map(self.model, self.neurons)
         self.muscles = Muscles(self.model, self.mmap, self.params.dt)
-        self.senses = Senses(self.model, self.neurons, self.params.dt, seed=seed)
+        self.env = env or Environment()
+        self.senses = Senses(self.model, self.neurons, self.params.dt, seed=seed, env=self.env)
         self.senses.sugar = sugar
+        self.eyes: Eyes | None = None
+        if vision:
+            retinas = build_retinas(self.neurons, banc.load_positions())
+            self.eyes = Eyes(self.model, retinas, period_ms=vision_period_ms, size=vision_size, seed=seed)
+        self.vision_period_ms = vision_period_ms
+        self.head = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "c_head")
+        self.antenna = {s: mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, f"{s}_funiculus") for s in ("l", "r")}
+        self.arista = {s: mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_SITE, f"{s}_arista") for s in ("l", "r")}
         self.is_leg_mn = np.zeros(self.net.W.shape[0], dtype=bool)
         self.is_leg_mn[self.mmap.mn_idx] = True
         self.rng = np.random.default_rng(seed + 1)
@@ -82,6 +103,23 @@ class BodyBrainSim:
             m &= s.isin(val).to_numpy() if isinstance(val, (list, tuple, set)) else s.eq(val).to_numpy()
         return np.flatnonzero(m)
 
+    def apply_environment_forces(self) -> None:
+        """Vent (traînée) et son (force oscillante) appliqués à la base de chaque ariste, repère monde."""
+        m, d, env = self.model, self.data, self.env
+        d.qfrc_applied[:] = 0.0
+        if not np.any(env.wind) and env.sound <= 0:
+            return
+        t = self.stepper.t_ms / 1000.0
+        head = d.xmat[self.head].reshape(3, 3)
+        for s in ("l", "r"):
+            body, site = self.antenna[s], self.arista[s]
+            vel = np.zeros(6)
+            mujoco.mj_objectVelocity(m, d, mujoco.mjtObj.mjOBJ_SITE, site, vel, 0)
+            f = WIND_DRAG * (np.asarray(env.wind) - vel[3:])
+            if env.sound > 0:
+                f = f + head @ np.array([1.0, 0.0, 0.0]) * SOUND_FORCE * env.sound * np.sin(2 * np.pi * env.sound_hz * t)
+            mujoco.mj_applyFT(m, d, f, np.zeros(3), d.site_xpos[site], body, d.qfrc_applied)
+
     def run(self, duration_ms: float, stim_idx: np.ndarray | None = None, stim_rate_hz: float = 0.0,
             record_every_ms: float = 1.0, render=None, render_every_ms: float = 20.0,
             spike_log: bool = False, progress: bool = False) -> Trace:
@@ -93,14 +131,22 @@ class BodyBrainSim:
         tr = Trace()
         self.spike_times, self.spike_neurons = [], []
         acc = np.zeros(3)
+        vis_every = max(1, round(self.vision_period_ms / dt))
         for k in range(n_steps):
             self.senses.read(d)
             forced = [self.senses.spikes()]
+            currents = None
+            if self.eyes is not None:
+                if k % vis_every == 0:
+                    self.eyes.update(d)
+                forced.append(self.eyes.spikes(dt, self.rng))
+                currents = self.eyes.currents()
             if stim_idx is not None and p_stim > 0:
                 forced.append(stim_idx[self.rng.random(stim_idx.size) < p_stim])
             forced = np.concatenate(forced)
-            spiking = st.step(forced)
+            spiking = st.step(forced, currents)
             self.muscles.step(spiking, d)
+            self.apply_environment_forces()
             mujoco.mj_step(m, d)
             n_mn = int(self.is_leg_mn[spiking].sum())
             acc += (spiking.size, n_mn, forced.size)

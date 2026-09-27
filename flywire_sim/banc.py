@@ -8,6 +8,10 @@ Les motoneurones sont forcés excitateurs : leurs prédictions NT sont connues p
 qu'il n'existe pas de MN GABAergique chez la drosophile, Lesser et al. 2024) ; leurs cibles sont
 de toute façon des muscles, hors du réseau.
 """
+import gzip
+import pickle
+import re
+
 import numpy as np
 import pandas as pd
 import scipy.sparse as sp
@@ -34,6 +38,30 @@ def load_neurons() -> pd.DataFrame:
     })
     n["root_id"] = n.root_id.astype(np.int64)
     return n
+
+
+# résolution des voxels du volume BANC (x, y, z) en nm ; les positions de `neuron_attributes` sont en voxels
+VOXEL_NM = np.array([4.0, 4.0, 45.0])
+POSITIONS_FILE = data.PROCESSED / "banc888_positions.csv.gz"
+
+
+def load_positions() -> pd.DataFrame:
+    """Position de référence de chaque neurone (export officiel Codex `neuron_attributes`), en µm.
+    Colonnes : root_id, x, y, z. Sert à la rétinotopie (voir body/vision.py)."""
+    if POSITIONS_FILE.exists():
+        return pd.read_csv(POSITIONS_FILE)
+    with gzip.open(BANC / "neuron_attributes.pickle.gz") as f:
+        attrs = pickle.load(f)
+    rows = []
+    for rid, a in attrs.items():
+        nums = re.findall(r"-?\d+", str(a.get("position", "")))
+        if len(nums) >= 3:
+            rows.append((int(rid), *(float(v) for v in nums[:3])))
+    pos = pd.DataFrame(rows, columns=["root_id", "x", "y", "z"])
+    pos[["x", "y", "z"]] = pos[["x", "y", "z"]].to_numpy() * VOXEL_NM / 1000.0
+    data.PROCESSED.mkdir(parents=True, exist_ok=True)
+    pos.to_csv(POSITIONS_FILE, index=False)
+    return pos
 
 
 def load_connections() -> pd.DataFrame:

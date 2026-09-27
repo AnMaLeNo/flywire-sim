@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Télécharge UNIQUEMENT les données officielles FlyWire v783 :
+# Télécharge UNIQUEMENT les données officielles FlyWire (FAFB v783 puis BANC v888) :
 #  - export statique Codex (Princeton, bucket public flywire-data) : neurones, connexions (>=5 synapses),
 #    classification hiérarchique (Schlegel et al.), labels communautaires, coordonnées.
 #  - dépôt Zenodo du FlyWire Consortium (Dorkenwald et al. 2024) : connexions proofread non seuillées.
@@ -24,4 +24,10 @@ fi
 
 ANN="https://raw.githubusercontent.com/flyconnectome/flywire_annotations/main/supplemental_files/Supplemental_file1_neuron_annotations.tsv"
 [ -s "$RAW/Supplemental_file1_neuron_annotations.tsv" ] || curl -sSL -o "$RAW/Supplemental_file1_neuron_annotations.tsv" "$ANN"
+# BANC v888 (cerveau + moelle, export statique Codex, même bucket public)
+mkdir -p "$RAW/banc888"
+BANC="https://storage.googleapis.com/flywire-data/codex/data/banc/888"
+for f in neurons.csv.gz connections_princeton.csv.gz neuron_attributes.pickle.gz; do
+  [ -s "$RAW/banc888/$f" ] || curl -sSL -o "$RAW/banc888/$f" "$BANC/$f"
+done
 echo "OK -> $RAW"
