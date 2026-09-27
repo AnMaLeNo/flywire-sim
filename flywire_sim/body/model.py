@@ -16,6 +16,10 @@ roll = autour de z (rotation propre du segment).
 import json
 from pathlib import Path
 
+import numpy as np
+
+from .vision import eye_cameras_xml
+
 HERE = Path(__file__).resolve().parent
 MESHES = HERE / "meshes"
 RIG = json.loads((HERE / "nmf_rigging.json").read_text())
@@ -105,13 +109,16 @@ def _leg_xml(leg, stiffness, damping):
             out.append(f'<site name="{leg}_claw" pos="0 0 {-seg_len:.4g}" size="0.03"/>')
             out.append(f'<geom class="adhesion" type="sphere" pos="0 0 {-seg_len:.4g}" size="0.03" mass="1e-8"/>')
         if seg.startswith("tarsus"):
-            out.append(f'<site name="{name}_touch" type="capsule" fromto="0 0 0 0 0 {-seg_len:.4g}" size="{r + 0.005}"/>')
+            # la zone tactile englobe la griffe (sphère d'adhésion) au bout du dernier tarsomère
+            tip = seg_len + (0.04 if seg == "tarsus5" else 0.0)
+            out.append(f'<site name="{name}_touch" type="capsule" fromto="0 0 0 0 0 {-tip:.4g}" size="{r + 0.02}"/>')
         parent = seg
     out.append("</body>" * len(LEG_CHAIN))
     return "\n".join(out)
 
 
-def build_mjcf(stiffness: float = 20.0, damping: float = 0.05, adhesion_gain: float = 20.0) -> str:
+def build_mjcf(stiffness: float = 20.0, damping: float = 0.05, adhesion_gain: float = 20.0, extra_xml: str = "") -> str:
+    """`extra_xml` : éléments ajoutés au worldbody (objets de la scène pour les expériences)."""
     # les segments droits sont le miroir (y -> -y) des maillages gauches du scan
     meshes = "\n".join(f'<mesh name="{n}" file="{"l" + n[1:] if n[0] == "r" else n}.stl" '
                        f'scale="1000 {-1000 if n[0] == "r" else 1000} 1000"/>'
@@ -119,6 +126,22 @@ def build_mjcf(stiffness: float = 20.0, damping: float = 0.05, adhesion_gain: fl
     thorax = RIGGING["c_thorax"]
     head = RIGGING["c_head"]
     legs = "\n".join(_leg_xml(leg, stiffness, damping) for leg in LEGS)
+
+    def _eye_cam(side):
+        # surface externe de l'œil, dans le repère de la tête (centroïde du maillage + 0.25 mm latéral)
+        e = np.array(RIGGING[f"{side}_eye"]["pos"])
+        return e + np.array([0.0, 0.25 if side == "l" else -0.25, 0.0])
+
+    def antenna(side):
+        # 3e segment (funicule) + ariste : récepteur rigide (~1.5 µg) pivotant sur le pédicelle, 2 DoF faibles
+        # (organe de Johnston). Raideur/inertie donnent une résonance ~400 Hz (Göpfert & Robert 2002 : ~420 Hz
+        # passive), déviation statique par la gravité ~1° ; le vent et le son sont appliqués en force (sim.py).
+        return simple(f"{side}_funiculus",
+                      f'<joint name="{side}_antenna_pitch" axis="0 1 0" range="-15 15" stiffness="{stiffness * 0.005}" damping="3e-5" armature="1e-9"/>'
+                      f'<joint name="{side}_antenna_yaw" axis="0 0 1" range="-15 15" stiffness="{stiffness * 0.005}" damping="3e-5" armature="1e-9"/>'
+                      f'<geom type="sphere" size="0.05" pos="{_fmt(RIGGING[f"{side}_arista"]["pos"])}" contype="0" conaffinity="0" group="3" mass="1.5e-6"/>'
+                      f'<site name="{side}_arista" pos="{_fmt(RIGGING[f"{side}_arista"]["pos"])}" size="0.02"/>'
+                      f'<site name="{side}_antenna_touch" type="sphere" size="0.1"/>')
 
     def simple(name, extra=""):
         r = RIGGING[name]
@@ -130,7 +153,8 @@ def build_mjcf(stiffness: float = 20.0, damping: float = 0.05, adhesion_gain: fl
         abd += (f'<body name="{seg}" pos="{_fmt(r["pos"])}" quat="{_fmt(r["quat"])}">'
                 f'<joint name="{seg}_pitch" axis="0 1 0" range="-25 25" stiffness="{stiffness*3}" damping="{damping*3}"/>'
                 f'<geom class="visual" mesh="{seg}"/>'
-                f'<geom class="collision" type="ellipsoid" size="0.16 0.3 0.28" pos="-0.1 0 0" mass="{r["mass"]:.4g}"/>')
+                f'<geom class="collision" type="ellipsoid" size="0.16 0.3 0.28" pos="-0.1 0 0" mass="{r["mass"]:.4g}"/>'
+                f'<site name="{seg}_touch" type="ellipsoid" size="0.17 0.31 0.29" pos="-0.1 0 0"/>')
     abd += "</body>" * 5
 
     actuators = []
@@ -153,6 +177,16 @@ def build_mjcf(stiffness: float = 20.0, damping: float = 0.05, adhesion_gain: fl
         for k in range(1, 6):
             sensors.append(f'<touch name="{leg}_tarsus{k}_contact" site="{leg}_tarsus{k}_touch"/>')
         sensors.append(f'<force name="{leg}_load" site="{leg}_claw"/>')
+    for site in ("head", "thorax", "labellum", "l_antenna", "r_antenna", "c_abdomen12", "c_abdomen3",
+                 "c_abdomen4", "c_abdomen5", "c_abdomen6"):
+        sensors.append(f'<touch name="{site}_contact" site="{site}_touch"/>')
+    for side in ("l", "r"):
+        sensors.append(f'<jointpos name="{side}_antenna_pitch_pos" joint="{side}_antenna_pitch"/>'
+                       f'<jointpos name="{side}_antenna_yaw_pos" joint="{side}_antenna_yaw"/>'
+                       f'<jointvel name="{side}_antenna_pitch_vel" joint="{side}_antenna_pitch"/>'
+                       f'<jointvel name="{side}_antenna_yaw_vel" joint="{side}_antenna_yaw"/>')
+    for j in ("neck_yaw", "neck_pitch", "neck_roll", "rostrum_pitch", "haustellum_pitch"):
+        sensors.append(f'<jointpos name="{j}_pos" joint="{j}"/>')
     sensors.append('<framequat name="thorax_quat" objtype="body" objname="c_thorax"/>'
                    '<gyro name="thorax_gyro" site="thorax_site"/><accelerometer name="thorax_acc" site="thorax_site"/>')
 
@@ -186,22 +220,27 @@ def build_mjcf(stiffness: float = 20.0, damping: float = 0.05, adhesion_gain: fl
     <site name="thorax_site" size="0.02"/>
     <geom class="visual" mesh="c_thorax"/>
     <geom class="collision" type="ellipsoid" size="0.55 0.4 0.4" pos="-0.15 0 -0.05" mass="{thorax["mass"]:.4g}"/>
+    <site name="thorax_touch" type="ellipsoid" size="0.56 0.41 0.41" pos="-0.15 0 -0.05"/>
     <body name="c_head" pos="{_fmt(head["pos"])}">
       <joint name="neck_yaw" axis="0 0 1" range="-40 40" stiffness="{stiffness*2}" damping="{damping*2}"/>
       <joint name="neck_pitch" axis="0 1 0" range="-40 40" stiffness="{stiffness*2}" damping="{damping*2}"/>
       <joint name="neck_roll" axis="1 0 0" range="-30 30" stiffness="{stiffness*2}" damping="{damping*2}"/>
       <geom class="visual" mesh="c_head"/>
       <geom class="collision" type="ellipsoid" size="0.3 0.35 0.35" pos="0.25 0 0" mass="{head["mass"]:.4g}"/>
+      <site name="head_touch" type="ellipsoid" size="0.31 0.36 0.36" pos="0.25 0 0"/>
+      {eye_cameras_xml("l", _eye_cam("l"))}{eye_cameras_xml("r", _eye_cam("r"))}
       {simple("l_eye")}</body>{simple("r_eye")}</body>
-      {simple("l_pedicel")}{simple("l_funiculus")}{simple("l_arista")}</body></body></body>
-      {simple("r_pedicel")}{simple("r_funiculus")}{simple("r_arista")}</body></body></body>
+      {simple("l_pedicel")}{antenna("l")}{simple("l_arista")}</body></body></body>
+      {simple("r_pedicel")}{antenna("r")}{simple("r_arista")}</body></body></body>
       {simple("c_rostrum", f'<joint name="rostrum_pitch" axis="0 1 0" range="-10 50" stiffness="{stiffness}" damping="{damping}"/>')}
-        {simple("c_haustellum", f'<joint name="haustellum_pitch" axis="0 1 0" range="-40 40" stiffness="{stiffness}" damping="{damping}"/>')}</body></body>
+        {simple("c_haustellum", f'<joint name="haustellum_pitch" axis="0 1 0" range="-40 40" stiffness="{stiffness}" damping="{damping}"/>')}
+        <site name="labellum" pos="0.05 0 -0.15" size="0.02"/><site name="labellum_touch" type="sphere" size="0.12" pos="0.05 0 -0.12"/></body></body>
     </body>
     {simple("l_haltere")}</body>{simple("r_haltere")}</body>
     {abd}
     {legs}
   </body>
+  {extra_xml}
 </worldbody>
 <contact>
 {chr(10).join(f'<exclude body1="c_thorax" body2="{leg}_trochanterfemur"/>' for leg in LEGS)}
