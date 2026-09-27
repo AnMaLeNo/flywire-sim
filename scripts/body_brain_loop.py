@@ -24,14 +24,12 @@ ap.add_argument("--dn", nargs="+", default=["DNg100"], help="types de DN stimul�
 ap.add_argument("--w", type=float, default=banc.CALIBRATED_V2.w_syn, help="mV par synapse (défaut : CALIBRATED_V2)")
 ap.add_argument("--gamma", type=float, default=banc.CALIBRATED_V2.size_norm)
 ap.add_argument("--adapt", type=float, default=banc.CALIBRATED_V2.adapt_b)
-ap.add_argument("--no-completeness", action="store_true", help="sans correction de complétude de la moelle")
 ap.add_argument("--no-stim", action="store_true")
 ap.add_argument("--video", action="store_true")
 ap.add_argument("--out", default="body_brain_loop")
 args = ap.parse_args()
 
-sim = BodyBrainSim(replace(banc.CALIBRATED_V2, w_syn=args.w, size_norm=args.gamma, adapt_b=args.adapt),
-                   completeness_correction=not args.no_completeness)
+sim = BodyBrainSim(replace(banc.CALIBRATED_V2, w_syn=args.w, size_norm=args.gamma, adapt_b=args.adapt))
 print(f"réseau : {sim.net.W.shape[0]} neurones ; MN de patte reliés aux muscles : {sim.mmap.mn_idx.size} "
       f"({sim.mmap.unmapped.shape[0]} non reliés : {sim.mmap.unmapped.cell_type.value_counts().to_dict()})")
 s = sim.senses.summary()

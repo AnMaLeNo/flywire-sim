@@ -45,8 +45,8 @@ def test_per_neuron_depression_matches_scalar_when_uniform():
 
 @pytest.fixture(scope="module")
 def net_neurons():
-    from flywire_sim.body.sim import load_banc
-    return load_banc()
+    from flywire_sim.body.sim import load_network
+    return load_network()
 
 
 def test_antennal_lobe_populations(net_neurons):

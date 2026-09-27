@@ -1,10 +1,10 @@
-"""Boucle fermée cerveau (BANC, LIF) <-> corps (MuJoCo).
+"""Boucle fermée cerveau (BANC) + moelle (MANC) en LIF <-> corps (MuJoCo). Réseau : hybrid.py.
 
 À chaque pas (dt commun = 0.1 ms) :
   1. capteurs MuJoCo + environnement -> grandeurs normalisées -> spikes forcés des neurones sensoriels
      (senses.py) ; toutes les `vision_period_ms` : rendu par œil -> photorécepteurs (vision.py), dont la
      sortie est injectée en courant (L1-L3) ou en spikes forcés (R7/R8) à chaque pas
-  2. un pas de LIF sur le réseau BANC complet (spikes sensoriels forcés + stimulation expérimentale)
+  2. un pas de LIF sur le réseau hybride complet (spikes sensoriels forcés + stimulation expérimentale)
   3. spikes des motoneurones de patte -> activation musculaire -> ctrl des actionneurs (muscles.py)
   4. forces d'environnement (vent, son) sur les antennes, puis un pas de MuJoCo
 """
@@ -14,7 +14,7 @@ import mujoco
 import numpy as np
 import pandas as pd
 
-from .. import banc, completeness, data
+from .. import banc, hybrid
 from ..lif import LIFNetwork, LIFParams, LIFStepper
 from ..network import Network
 from .environment import Environment
@@ -23,16 +23,11 @@ from .muscles import Muscles, build_motor_map
 from .senses import Senses
 from .vision import Eyes, build_retinas
 
-NETWORK_FILE = data.PROCESSED / "network_banc888_min5.npz"
 
-
-def load_banc(min_synapses: int = 5) -> tuple[Network, pd.DataFrame]:
-    if NETWORK_FILE.exists() and min_synapses == 5:
-        net = Network.load(NETWORK_FILE)
-    else:
-        net = banc.build(min_synapses)
-    n = banc.load_neurons().set_index("root_id").reindex(net.root_ids).reset_index()
-    for c in ("function", "body_part", "cell_type", "side", "super_class", "sub_class", "region"):
+def load_network(min_synapses: int = 5) -> tuple[Network, pd.DataFrame]:
+    """Réseau hybride (cerveau BANC + moelle MANC) et table des neurones alignée sur ses indices."""
+    net, n = hybrid.load(min_synapses)
+    for c in ("function", "body_part", "cell_type", "side", "super_class", "sub_class", "cls", "region", "bridge"):
         n[c] = n[c].fillna("")
     return net, n
 
@@ -57,13 +52,11 @@ class BodyBrainSim:
     def __init__(self, params: LIFParams | None = None, seed: int = 0, sugar: float = 0.0,
                  env: Environment | None = None, vision: bool = False, vision_period_ms: float = 5.0,
                  vision_size: int = 32, extra_xml: str = "", orn_std_u: float = banc.ORN_STD_U,
-                 eln_gain: float = banc.ELN_ELECTRICAL_GAIN, completeness_correction: bool = True):
-        self.net, self.neurons = load_banc()
+                 eln_gain: float = banc.ELN_ELECTRICAL_GAIN):
+        self.net, self.neurons = load_network()
         self.params = params or banc.CALIBRATED_V2
         assert abs(self.params.dt - 0.1) < 1e-9, "dt cerveau = dt physique = 0.1 ms"
         W = banc.clamp_afferents(self.net.W, self.neurons)
-        if completeness_correction:
-            W = completeness.apply(W, self.net.root_ids)
         if eln_gain != 1.0:
             W = banc.synaptic_efficacy(W, self.neurons, self.net.sign, eln_gain)
         self.lif = LIFNetwork(W, self.params, seed=seed, std_U=banc.depression_U(self.neurons, orn_std_u))
