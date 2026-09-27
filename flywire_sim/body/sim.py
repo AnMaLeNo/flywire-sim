@@ -56,11 +56,15 @@ SOUND_FORCE = 0.017
 class BodyBrainSim:
     def __init__(self, params: LIFParams | None = None, seed: int = 0, sugar: float = 0.0,
                  env: Environment | None = None, vision: bool = False, vision_period_ms: float = 5.0,
-                 vision_size: int = 32, extra_xml: str = ""):
+                 vision_size: int = 32, extra_xml: str = "", orn_std_u: float = banc.ORN_STD_U,
+                 eln_gain: float = banc.ELN_ELECTRICAL_GAIN):
         self.net, self.neurons = load_banc()
-        self.params = params or banc.CALIBRATED
+        self.params = params or banc.CALIBRATED_V2
         assert abs(self.params.dt - 0.1) < 1e-9, "dt cerveau = dt physique = 0.1 ms"
-        self.lif = LIFNetwork(banc.clamp_afferents(self.net.W, self.neurons), self.params, seed=seed)
+        W = banc.clamp_afferents(self.net.W, self.neurons)
+        if eln_gain != 1.0:
+            W = banc.synaptic_efficacy(W, self.neurons, self.net.sign, eln_gain)
+        self.lif = LIFNetwork(W, self.params, seed=seed, std_U=banc.depression_U(self.neurons, orn_std_u))
         self.stepper: LIFStepper = self.lif.stepper()
         self.model = mujoco.MjModel.from_xml_string(build_mjcf(extra_xml=extra_xml))
         assert abs(self.model.opt.timestep * 1000 - self.params.dt) < 1e-9

@@ -74,11 +74,16 @@ class SimResult:
 
 
 class LIFNetwork:
-    def __init__(self, W: sp.csc_matrix, params: LIFParams | None = None, seed: int = 0):
+    def __init__(self, W: sp.csc_matrix, params: LIFParams | None = None, seed: int = 0,
+                 std_U: np.ndarray | None = None):
         # W[post, pre] en synapses signées ; on la garde en CSC pour extraire vite les colonnes des
-        # neurones qui ont tiré (W[:, spiking] @ 1).
+        # neurones qui ont tiré (W[:, spiking] @ 1). `std_U` : fraction de ressources libérée par spike,
+        # par neurone présynaptique (remplace le scalaire params.std_U ; 0 = pas de dépression).
         self.p = params or LIFParams()
         self.n = W.shape[0]
+        self.std_U = (np.full(self.n, self.p.std_U, dtype=np.float32) if std_U is None
+                      else np.asarray(std_U, dtype=np.float32))
+        assert self.std_U.shape == (self.n,)
         W = W.tocsc().astype(np.float32)
         if self.p.size_norm > 0:
             n_in = np.asarray(abs(W).sum(axis=1)).ravel()
@@ -161,7 +166,7 @@ class LIFStepper:
         self.decay_a = np.float32(np.exp(-dt / p.tau_adapt))
         self.x = np.ones(n, dtype=np.float32)           # ressources synaptiques par neurone présynaptique
         self.rec = np.float32(dt / p.tau_rec)
-        self.use_std = p.std_U > 0
+        self.use_std = bool(np.any(net.std_U > 0))
         self.refr = np.zeros(n, dtype=np.int32)
         # tampon circulaire : incréments de g à appliquer dans `delay_steps` pas
         self.ring = np.zeros((self.delay_steps, n), dtype=np.float32)
@@ -214,7 +219,7 @@ class LIFStepper:
                 a[spiking] += p.adapt_b
             if self.use_std:
                 eff = x[spiking].astype(np.float32)   # poids nominal quand x=1
-                x[spiking] *= 1.0 - p.std_U
+                x[spiking] *= 1.0 - self.net.std_U[spiking]
                 dg = self.net.W[:, spiking] @ eff
             else:
                 dg = self.net.W[:, spiking].sum(axis=1)

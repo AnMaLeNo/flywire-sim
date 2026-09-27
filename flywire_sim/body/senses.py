@@ -82,6 +82,7 @@ class Senses:
         self.rng = np.random.default_rng(seed)
         self.legs: list[LegSenses] = []
         self.body: dict[str, Channel] = {}
+        self.enabled: set[str] | None = None   # clés de canaux autorisés à tirer (None = tous) ; expériences d'ablation
         self.sensor = {mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_SENSOR, i): model.sensor_adr[i] for i in range(model.nsensor)}
         self.site = {mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_SITE, i): i for i in range(model.nsite)}
         self._build_legs(n)
@@ -105,14 +106,22 @@ class Senses:
             hook = _split(_pop(sub, f"{part}_hook_chordotonal_organ_neuron"), 2)
             ls.channels["hook_flex"] = Channel(sub.index.to_numpy()[hook[0]], 150.0)
             ls.channels["hook_ext"] = Channel(sub.index.to_numpy()[hook[1]], 150.0)
-            ls.channels["club"] = Channel(sub.index.to_numpy()[_pop(sub, f"{part}_club_chordotonal_organ_neuron")], 100.0)
+            club = np.concatenate([_pop(sub, f"{part}_club_chordotonal_organ_neuron"),
+                                   _pop(sub, f"{part}_chordotonal_organ_neuron", "vibro")])   # FeCO sans sous-type : vibration
+            ls.channels["club"] = Channel(sub.index.to_numpy()[club], 100.0)
             ls.channels["campaniform"] = Channel(sub.index.to_numpy()[_pop(sub, f"{part}_campaniform_sensillum_neuron")], 120.0)
+            # soies tactiles réparties le long des 5 tarsomères : seules celles du segment en contact répondent,
+            # de façon phasique (Tuthill & Wilson 2016 : bouffée au contact, faible taux soutenu)
             tactile = np.concatenate([_pop(sub, f"{part}_bristle_neuron", "tactile"),
                                       _pop(sub, f"{part}_taste_bristle_tactile_neuron")])
-            ls.channels["tactile"] = Channel(sub.index.to_numpy()[tactile], 50.0, tau_adapt_ms=300.0, adapt_frac=0.8)
+            for k, idx in enumerate(_split(tactile, 5), start=1):
+                ls.channels[f"tactile{k}"] = Channel(sub.index.to_numpy()[idx], 50.0, tau_adapt_ms=100.0, adapt_frac=0.9)
+            grn = sub[sub.sub_class.eq(f"{part}_taste_bristle_gustatory_neuron")]
             for taste in LEG_TASTES:
-                idx = _pop(sub, f"{part}_taste_bristle_gustatory_neuron", taste)
-                ls.channels[taste] = Channel(sub.index.to_numpy()[idx], TASTE_RMAX[taste], tau_adapt_ms=1000.0, adapt_frac=0.5)
+                m = grn.function.str.contains(taste, regex=False)
+                if taste == "contact_pheromone":                          # ppk23/ppk25 : cellules F/M (Thistle 2012, Toda 2012)
+                    m |= grn.function.str.contains("ppk23", regex=False)
+                ls.channels[taste] = Channel(grn.index.to_numpy()[m.to_numpy()], TASTE_RMAX[taste], tau_adapt_ms=1000.0, adapt_frac=0.5)
             self.legs.append(ls)
 
     def _build_body(self, n: pd.DataFrame) -> None:
@@ -153,7 +162,10 @@ class Senses:
             b[f"cooling_{s}"] = Channel(sel(cls="thermosensory_receptor_neuron", function="cooling", side=(side,)), 60.0, r_spont=5.0)
             b[f"heating_{s}"] = Channel(sel(cls="thermosensory_receptor_neuron", function="heating", side=(side,)), 60.0, r_spont=5.0)
             b[f"evaporation_{s}"] = Channel(sel(cls="thermosensory_receptor_neuron", function="evaporation", side=(side,)), 40.0, r_spont=3.0)
-            b[f"dry_{s}"] = Channel(sel(cls="hygrosensory_receptor_neuron", function="Ir40a", side=(side,)), 40.0, r_spont=3.0)
+            # triade hygrosensorielle du sacculus (Frank 2017) : cellules sèches Ir40a (VP4), cellules « froides »
+            # Ir40a (VP1d/VP1l, réponse au refroidissement) et cellules humides Ir68a (VP5)
+            b[f"dry_{s}"] = Channel(sel(cls="hygrosensory_receptor_neuron", function="Ir40a,dry", side=(side,)), 40.0, r_spont=3.0)
+            b[f"hygro_cooling_{s}"] = Channel(sel(cls="hygrosensory_receptor_neuron", function="Ir40a,cooling", side=(side,)), 40.0, r_spont=3.0)
             b[f"humid_{s}"] = Channel(sel(cls="hygrosensory_receptor_neuron", function="humid", side=(side,)), 40.0, r_spont=3.0)
         # ORN sans classe d'odeur annotée : taux spontané seul
         known = np.concatenate([c.neurons for k, c in b.items() if k.startswith("orn_")])
@@ -210,9 +222,12 @@ class Senses:
             adr = self.sensor[f"{leg}_load"]                              # force (µN) au bout du tarse
             load = float(np.linalg.norm(data.sensordata[adr:adr + 3]))
             ls.channels["campaniform"].value = np.clip(load / 5.0, 0, 1)   # ~ poids du corps / 2
-            touch = sum(self._s(data, f"{leg}_tarsus{k}_contact") for k in range(1, 6))
+            touch = 0.0
+            for k in range(1, 6):
+                tk = self._s(data, f"{leg}_tarsus{k}_contact")
+                ls.channels[f"tactile{k}"].value = 1.0 if tk > 0.01 else 0.0
+                touch += tk
             contact = touch > 0.01
-            ls.channels["tactile"].value = 1.0 if contact else 0.0
             ls.channels["club"].value = np.clip(abs(w) * 0.2, 0, 1)
             tastes = env.tastes_at(data.site_xpos[self.site[f"{leg}_claw"]]) if contact and env.taste_patches else {}
             for taste in LEG_TASTES:
@@ -261,6 +276,7 @@ class Senses:
             b[f"cooling_{s}"].value = np.clip(-dTdt, 0, 1)
             b[f"heating_{s}"].value = np.clip(dTdt, 0, 1)
             b[f"dry_{s}"].value = np.clip(1.0 - env.humidity, 0, 1)
+            b[f"hygro_cooling_{s}"].value = np.clip(-dTdt, 0, 1)
             b[f"humid_{s}"].value = np.clip(env.humidity, 0, 1)
             b[f"evaporation_{s}"].value = np.clip((1.0 - env.humidity) * 0.5 - 0.5 * dTdt, 0, 1)
         neck = max(abs(self._s(data, f"{j}_pos")) for j in ("neck_yaw", "neck_pitch", "neck_roll"))
@@ -273,14 +289,15 @@ class Senses:
     # ---- sortie ----------------------------------------------------------------------------------
     def _channels(self):
         for ls in self.legs:
-            yield from ls.channels.values()
-        yield from self.body.values()
+            for k, ch in ls.channels.items():
+                yield f"{ls.leg}:{k}", ch
+        yield from self.body.items()
 
     def spikes(self) -> np.ndarray:
         """Neurones sensoriels forcés à tirer sur ce pas (Poisson à partir des grandeurs lues)."""
         out = []
-        for ch in self._channels():
-            if not ch.neurons.size:
+        for key, ch in self._channels():
+            if not ch.neurons.size or (self.enabled is not None and key not in self.enabled):
                 continue
             r = ch.rate(self.dt_ms)
             if r > 0:
