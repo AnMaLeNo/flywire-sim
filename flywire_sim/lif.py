@@ -8,7 +8,9 @@ Modèle (par neurone i) :
 
 Constantes biophysiques issues de l'électrophysiologie de la drosophile telles que
 rapportées dans la littérature (V_rest -52 mV, V_thresh -45 mV, R_m 10 kOhm.cm², C_m 2 µF/cm²
-=> tau_m 20 ms, réfractaire 2.2 ms, tau_syn 5 ms, délai 1.8 ms). w_syn est le seul paramètre libre.
+=> tau_m 20 ms, réfractaire 2.2 ms, tau_syn 5 ms, délai 1.8 ms). w_syn est le paramètre libre principal ;
+`size_norm` (normalisation des entrées par la taille du neurone) et les freins optionnels servent à la
+calibration du BANC (voir docs/calibration.md).
 L'implémentation (numpy/scipy, intégration exacte des exponentielles, tampon circulaire pour le
 délai) est entièrement écrite ici.
 """
@@ -37,6 +39,11 @@ class LIFParams:
     # fraction U des ressources x est libérée (poids effectif ∝ U*x), x récupère en tau_rec
     std_U: float = 0.0
     tau_rec: float = 500.0     # ms
+    # normalisation par la taille du neurone (Pugliese et al. 2025 : seuil ∝ taille, gain ∝ 1/taille ;
+    # la taille est approximée par le nombre total de synapses d'entrée, cf. [74] dans leur article) :
+    # le poids effectif reçu par le neurone i est divisé par max(1, n_in_i / médiane)^size_norm
+    # (les gros neurones, à faible résistance d'entrée, reçoivent des PSP plus petits par synapse).
+    size_norm: float = 0.0
 
 
 @dataclass
@@ -70,9 +77,15 @@ class LIFNetwork:
     def __init__(self, W: sp.csc_matrix, params: LIFParams | None = None, seed: int = 0):
         # W[post, pre] en synapses signées ; on la garde en CSC pour extraire vite les colonnes des
         # neurones qui ont tiré (W[:, spiking] @ 1).
-        self.W = W.tocsc().astype(np.float32)
         self.p = params or LIFParams()
         self.n = W.shape[0]
+        W = W.tocsc().astype(np.float32)
+        if self.p.size_norm > 0:
+            n_in = np.asarray(abs(W).sum(axis=1)).ravel()
+            size = np.maximum(1.0, n_in / np.median(n_in[n_in > 0]))
+            scale = size ** -self.p.size_norm
+            W = sp.diags(scale.astype(np.float32)) @ W
+        self.W = W.tocsc()
         self.rng = np.random.default_rng(seed)
 
     def stepper(self) -> "LIFStepper":

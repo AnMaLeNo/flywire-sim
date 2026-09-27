@@ -13,9 +13,15 @@ import pandas as pd
 import scipy.sparse as sp
 
 from . import data
+from .lif import LIFParams
 from .network import INHIBITORY_NT, Network
 
 BANC = data.RAW / "banc888"
+
+# Régime retenu par scripts/banc_calibrate.py (voir docs/calibration.md) : DNg100 à 50 Hz recrute
+# ~100/391 MN de patte à 10-35 Hz (médiane ~20 Hz, cf. MN lents ~30 Hz, Azevedo et al. 2020), le VNC
+# reste stable (~3000 neurones actifs, ~35 Hz) sans emballement du cerveau.
+CALIBRATED = LIFParams(w_syn=2.0, size_norm=0.5)
 
 
 def load_neurons() -> pd.DataFrame:
@@ -36,13 +42,21 @@ def load_connections() -> pd.DataFrame:
                        usecols=["pre_root_id", "post_root_id", "syn_count"])
 
 
+def is_inhibitory(nt: np.ndarray) -> np.ndarray:
+    """Le NT prédit est en majuscules (GABA, GLUT, HIST...) ; le NT vérifié est en minuscules et peut
+    être composé ('gaba,nitric_oxide'). GABA et glutamate sont inhibiteurs dans le SNC de la drosophile
+    (GluCl, Liu & Wilson 2013), l'histamine des photorécepteurs aussi (HisCl/Ort, Gengs et al. 2002)."""
+    low = pd.Series(nt).str.lower()
+    return (low.str.contains("gaba|glutamate|histamine") | low.isin({t.lower() for t in INHIBITORY_NT | {"HIST"}})).to_numpy()
+
+
 def build(min_synapses: int = 3) -> Network:
     neurons = load_neurons()
     root_ids = np.sort(neurons.root_id.to_numpy())
     idx = pd.Index(root_ids)
     nrn = neurons.set_index("root_id").reindex(root_ids)
     nt = nrn.nt_verified.fillna(nrn.nt_pred).fillna("UNKNOWN").to_numpy(dtype=str)
-    sign = np.where(np.isin(nt, list(INHIBITORY_NT)), -1.0, 1.0).astype(np.float32)
+    sign = np.where(is_inhibitory(nt), -1.0, 1.0).astype(np.float32)
     sign[(nrn.super_class == "motor").to_numpy()] = 1.0
 
     pairs = load_connections().groupby(["pre_root_id", "post_root_id"], sort=False).syn_count.sum().reset_index()
@@ -55,3 +69,15 @@ def build(min_synapses: int = 3) -> Network:
     W = sp.csc_matrix((w, (post, pre)), shape=(len(root_ids), len(root_ids)))
     W.sum_duplicates()
     return Network(root_ids=root_ids, W=W, sign=sign, nt_type=nt)
+
+
+def clamp_afferents(W: sp.csc_matrix, neurons: pd.DataFrame) -> sp.csc_matrix:
+    """Supprime les entrées synaptiques centrales des neurones sensoriels (lignes de W à zéro).
+
+    Les afférents primaires tirent à partir de leur courant récepteur ; les synapses centrales sur leurs
+    terminaisons sont de l'inhibition présynaptique (GABA-B) qui module la libération sans déclencher de
+    spikes (Root et al. 2008, Clarke et al. 2015 ; voir docs/calibration.md). Dans le modèle, seuls les
+    spikes forcés par les capteurs (senses.py / Stimulus) peuvent les activer."""
+    is_sens = neurons.super_class.fillna("").str.startswith("sensory").to_numpy()
+    keep = sp.diags((~is_sens).astype(np.float32))
+    return (keep @ W).tocsc()

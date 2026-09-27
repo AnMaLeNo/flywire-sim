@@ -121,6 +121,9 @@ PYTHONPATH=. .venv/bin/python scripts/body_brain_loop.py --duration 200 --video 
 PYTHONPATH=. .venv/bin/pytest tests
 ```
 
-État : elle tient debout ; les muscles scriptés la font avancer ; en boucle fermée les DN de marche
-recrutent bien les motoneurones des 6 pattes mais à des taux trop élevés (co-contraction : elle se
-raidit au lieu de marcher). Prochaine étape : calibrer la dynamique du ganglion ventral.
+État : elle tient debout ; les muscles scriptés la font avancer ; en boucle fermée DNg100 (2 neurones
+descendants « marche ») recrute ~130/391 motoneurones de patte à ~15 Hz, sans emballement, dans le
+régime calibré `banc.CALIBRATED` (voir `docs/calibration.md` : signes GABA/glutamate/histamine vérifiés,
+afférents clampés, normalisation par la taille). Elle ne marche pas encore : le rythme de pas et le
+principe de taille des motoneurones restent à obtenir (`scripts/banc_calibrate.py`,
+`scripts/banc_walk_analysis.py`).
