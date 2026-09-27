@@ -77,15 +77,17 @@ def test_muscles_move_the_body(model):
     x0 = d.qpos[0]
     tripod = {"lf": 0.0, "rm": 0.0, "lh": 0.0, "rf": 0.5, "lm": 0.5, "rh": 0.5}
     aid = {mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_ACTUATOR, i): i for i in range(model.nu)}
+    # ctrl = fraction du couple tétanique du pool (LEG_MUSCLES, Azevedo 2020) : la marche n'en mobilise qu'une
+    # petite part (unités lentes / intermédiaires) ; à 0,8 / 0,6 du maximum la mouche se retourne.
     for k in range(10000):
         t = k * model.opt.timestep
         for leg in LEGS:
             swing = (t / 0.1 + tripod[leg]) % 1.0 < 0.35
             for mu in ("trochanter_flexor", "tibia_flexor", "sternal_anterior_rotator"):
-                d.ctrl[aid[f"{leg}_{mu}"]] = 0.8 if swing else 0.0
+                d.ctrl[aid[f"{leg}_{mu}"]] = 0.16 if swing else 0.0
             for mu in ("trochanter_extensor", "tibia_extensor", "sternal_posterior_rotator"):
-                d.ctrl[aid[f"{leg}_{mu}"]] = 0.0 if swing else 0.6
-            d.ctrl[aid[f"{leg}_adhesion"]] = 0.0 if swing else 1.0
+                d.ctrl[aid[f"{leg}_{mu}"]] = 0.0 if swing else 0.12
+            d.ctrl[aid[f"{leg}_adhesion"]] = 0.0 if swing else 0.3
         mujoco.mj_step(model, d)
     assert d.qpos[0] - x0 > 1.0, "le rythme tripode doit faire avancer le corps"
     q = d.qpos[3:7]

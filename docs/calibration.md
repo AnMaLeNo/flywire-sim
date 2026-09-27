@@ -685,6 +685,114 @@ pas les capteurs, pas le pont FAFB ↔ MANC.
    E_ACh ≈ 0 mV, E_GABA-A ≈ −70 mV) et n'adopter que ce qui est mesuré ou borné.
 2. Sous ce régime stabilisé, refaire § 9.3–9.4 : DNg100 → MN avec retour proprioceptif (les MN lents tirent à
    ~30 Hz en posture sous retour sensoriel, Azevedo 2020), rythmicité E1/E2/I1, alternance.
-3. Classes de MN (lent / intermédiaire / rapide ; Azevedo 2020, Lesser 2024 pour le MANC) et dynamique du
+3. Classes de MN (lent / intermédiaire / rapide ; Azevedo 2020, Lesser 2024 pour le MANC) et dynamique du (→ § 10)
    muscle (twitch / tétanos / fusion) : la conversion `per_spike` / `tau_ms` actuelle est homogène (§ 6.1).
 4. Campaniformes : adaptation tonique (Ridgel 2000, Szczecinski 2021) si une fraction adaptée est documentée.
+
+## 10. Classes de motoneurones et dynamique musculaire (`flywire_sim/body/motor_units.py`, `muscles.py`)
+
+Objectif : remplacer la conversion homogène spike → muscle (§ 6.1 : `per_spike` 0,05 et `tau_ms` 30 ms
+identiques pour les 330 MN reliés) par des unités motrices dont la force, la saturation, la cinétique et les
+propriétés intrinsèques sont **celles mesurées chez la drosophile**, classe par classe. Aucun neurone, aucune
+connexion, aucun appariement FAFB ↔ MANC n'est modifié ; les MN sans actionneur (66) restent non reliés.
+
+### 10.1 Ce qui est mesuré, ce qui ne l'est pas
+
+**Mesuré chez *D. melanogaster*** (Azevedo et al. 2020, eLife 9:e56754 ; MN des fléchisseurs du tibia de la
+patte avant, patch in vivo + force au bout du tibia) :
+
+| grandeur | lent | intermédiaire | rapide |
+|---|---|---|---|
+| taille (soma) | 5–10 µm | 8–12 µm | 13–21 µm |
+| résistance d'entrée | ~700 MΩ | ~300 MΩ | ~150 MΩ |
+| potentiel de repos | ~−48 mV | ~−60 mV | ~−68 mV |
+| activité au repos (posture) | ~30 Hz | ~0 | 0 |
+| force par spike (bout du tibia) | 0,013 µN (pente Fig. 4D) | ~1 µN | ~10 µN |
+| sommation | linéaire sur ≥ 50 spikes | 2 spikes → 1,6 × ; plateau ~3 × vers 10 spikes | idem |
+| secousse | intègre sur ≥ 500 ms, relaxe en 200–300 ms | pic ~15–20 ms, base à ~60–70 ms | idem |
+| force maximale du pool fléchisseur | ~100 µN (Fig. 1) | | |
+| recrutement | lent → intermédiaire → rapide (modulable par la proprioception) | | |
+
+Lesser et al. 2024 (MANC, patte avant) : le nombre de synapses d'entrée d'un MN est proportionnel à sa surface
+(0,45 synapse/µm²) et, dans la plupart des modules prémoteurs, les poids sont proportionnels à la taille du MN —
+architecture compatible avec le recrutement hiérarchique. Les annotations officielles du MANC (`cell_type`,
+`sub_class`, `labels`) **ne contiennent aucune étiquette lent / intermédiaire / rapide**.
+
+**Mesuré chez un autre insecte, non transposé** : Harischandra et al. 2019 (extensor tibiae du criquet) : secousse
+influençant la force ≥ 200 ms, temps au pic 61–67 ms, potentiation dépendante de l'historique, relaxation
+dépendante de la fréquence. Ces valeurs (muscle 100 × plus gros, cinétique 4 × plus lente que la drosophile)
+servent seulement de repère qualitatif ; **aucune** n'est adoptée.
+
+**Non mesuré** (laissé au régime global ou non modélisé) : seuil de décharge des MN, τ_m des MN, potentiation,
+dépendance longueur / vitesse du muscle de patte de drosophile, forces par spike des muscles autres que le
+fléchisseur du tibia.
+
+### 10.2 Identification des classes dans le MANC : le volume officiel comme proxy
+
+Sans annotation de classe, le seul ordre disponible neurone par neurone est le **volume officiel**
+(`Volume (nm^3)`, § 9.2), qui suit la taille du soma d'Azevedo et la surface de Lesser. Le fléchisseur du tibia
+de la patte avant (5 MN `tibia_flexor` + 10 `accessory_tibia_flexor` par côté, le module de Lesser) sert de
+règle : le plus gros MN (1,39 × 10¹² nm³, moyenne G/D) est le rapide unique du pool, les MN à 0,5–0,9 × 10¹²
+les intermédiaires, les plus petits accessoires distaux (~1,4 × 10¹¹) les lents. Étiquettes (rapports
+uniquement, seuils 0,2 et 0,7 × V_rapide) : **66 lents, 243 intermédiaires, 87 rapides** sur 396 MN de patte
+(`scripts/motor_units_report.py`). Limites : c'est un proxy, pas une mesure ; les pools dont Azevedo n'a pas
+mesuré de MN (rotateurs, LTM, tarses…) reçoivent la même loi par extrapolation ; le MANC est un mâle.
+
+### 10.3 Lois adoptées (toutes continues en V, ajustées sur les trois points mesurés)
+
+| paramètre | loi | source / statut |
+|---|---|---|
+| couple par spike | T1(V) = 5,2 µN·mm × min(V/V_rapide, 1)³ (10 µN × 0,52 mm de tibia) | ajustement sur 10 / 1 / 0,013 µN (exposant 2,8 mesuré, plage 2,5–3,3) |
+| saturation | T(a) = T1 · (1 − e^(−a/A)) / (1 − e^(−1/A)) ; A = 2,5 (rapide) → 50 (lent) | reproduit 1,6 × à 2 spikes, plateau 3 × ; lent linéaire |
+| secousse | noyau (e^(−t/τd) − e^(−t/τr)) normé ; τr/τd = 12/15 ms (rapide) → 20/300 ms (lent) | pic 13 ms, < 10 % à 70 ms ; lent : relaxation 300 ms |
+| potentiel de repos | V_rest(V) = −8,2 mV · ln(V/10¹¹) − 44,6 mV, borné [−68, −48] | mesuré (−48 / −60 / −68) ; `LIFNetwork(v_rest=)` |
+| résistance d'entrée | gain des entrées ∝ V^−0,67 (700 → 150 MΩ pour V × 10), = 1 au volume médian du MANC | rapport mesuré ; **l'ancrage (V_REF) est une hypothèse** ; `LIFNetwork(gain=)` |
+| couple max par actionneur | Σ des couples tétaniques des MN du pool (moyenne des six pattes) → `LEG_MUSCLES` | dérivé ; vérification : pool fléchisseur patte avant G = 103 µN au bout du tibia (mesuré ~100 ; D = 144) |
+| `ctrl` MuJoCo | Σ couples des unités / couple max, borné à 1 ; adhésion tarsale = fraction du LTM | inchangé dans son principe |
+
+Non adopté : potentiation (criquet seulement), dépendance longueur/vitesse (non mesurée), seuil / τ_m propres
+aux MN (non mesurés : le seuil global −45 mV reste). Les anciens couples de `LEG_MUSCLES` (3–6 µN·mm,
+« hypothèses à calibrer ») étaient 4–8 × trop faibles par rapport au pool mesuré ; le test de marche scriptée
+(`tests/test_body.py`) et `scripts/body_muscle_test.py` pilotent donc désormais les muscles à 0,12–0,16 du
+maximum (à 0,6–0,8 du maximum mesuré, la mouche se retourne), ce qui est cohérent avec Azevedo (la marche
+mobilise les unités lentes / intermédiaires, une petite fraction des 100 µN).
+
+### 10.4 Résultats (FAFB v783 + MANC, CALIBRATED_V2, 1 000 ms, `scripts/mn_classes_loop.py`)
+
+| régime | spk/ms | MN patte (Hz, % actifs) | MN reliés actifs / 330 : rapides / interm. / lents (taux) | act. musc. moy./max | hauteur | appui ; levers | corr. G/D |
+|---|---|---|---|---|---|---|---|
+| **avant** (main), repos | 145 | 3,0 Hz (28 %) | 101 (11 Hz) | 0,015 / 0,76 | 0,80 | 0,99–1,00 ; 0–2 | +1 |
+| avant, DNg100 (§ 8) | 151 | 3,7 Hz (21 %) | 75 (18 Hz) | 0,018 / 0,86 | 0,78 | 0,98–1,00 ; 0–3 | +0,94 |
+| unités motrices seules, repos | 214 | 3,1 Hz (20 %) | 64 : **39** / 22 / 3 (18 / 14 / 4 Hz) | 0,031 / 1,00 | 0,68–0,81 | 0,57–0,89 ; 11–21 | −0,32 / −0,07 / +0,47 |
+| unités motrices seules, DNg100 | 216 | 3,4 Hz (21 %) | 68 (16 Hz) | 0,034 / 1,00 | 0,80 | 0,52–0,96 ; 16–23 | +0,12 / −0,05 / +0,07 |
+| + V_rest et R_in mesurés (**retenu**), repos | 187 | 1,1 Hz (13 %) | 42 : 21 / 17 / 4 (8 / 9 / 8 Hz) | 0,009 / 0,99 | 0,58–0,71 | 0,84–1,00 ; 1–15 | +0,39 / +0,26 / −0,01 |
+| retenu, DNg100 | 168 | 0,8 Hz (9 %) | 28 : 13 / 13 / 2 (9 / 9 / 7 Hz) | 0,006 / 1,00 | 0,82 | 0,83–0,99 ; 3–24 | +0,19 / +0,06 / −0,03 |
+
+(période dominante des levers : au plancher de 30 ms partout où il y en a → **battement de contact**, pas un pas ;
+un cycle de marche vaut 100–200 ms.)
+
+Lecture :
+- Avec la dynamique par classe seule, les **MN rapides sont les plus actifs au repos** (39/76 à 18 Hz, jusqu'à
+  75 Hz ; lents : 3/51) — l'inverse d'Azevedo. Chaque spike rapide (5,2 µN·mm ≈ 3 × la charge statique d'une
+  patte) fait sauter la patte : d'où les 11–23 levers/s à 30 ms et la chute de hauteur. Le corps répond donc
+  correctement à un ordre de recrutement faux.
+- Cause dans les données : les entrées synaptiques des MN du MANC croissent **plus vite que leur volume**
+  (médianes : rapides 4 174 synapses pour 12,9 × 10¹¹ nm³, intermédiaires 1 027 / 5,7, lents 180 / 1,75, soit
+  ∝ V^1,5), alors que R_in ne décroît qu'en V^−0,67 : la pulsion nette croît encore en V^0,9. Lesser
+  (poids ∝ taille) et Azevedo (R_in ∝ 1/taille) prévoient une dépolarisation égale ; dans la sommation LIF
+  actuelle la différence de V_rest (20 mV) ne suffit pas à rétablir l'ordre lent → rapide.
+- Avec V_rest et R_in mesurés, l'activité motrice au repos chute (MN 1,1 Hz, 42 actifs à 8 Hz, activation 0,009),
+  le battement diminue (1–15 levers) mais les rapides restent majoritaires et **les lents ne tirent pas à 30 Hz** ;
+  DNg100 reste ≈ repos (attracteur du § 9 inchangé), aucune alternance, aucun déplacement, hauteur 0,7–0,8 mm
+  (tassement déjà présent avant, § 8).
+- Le pool fléchisseur mesuré (100 µN) est reproduit à 3 % à gauche, surestimé de 44 % à droite (deux gros MN
+  au lieu d'un : asymétrie du MANC ou limite du proxy).
+
+### 10.5 Décision
+
+Retenu (mesuré ou dérivé de mesures, réversible) : classes par volume, T1 / saturation / secousse par unité,
+V_rest et R_in par MN, couples de pool. Non retenu : tout réglage qui forcerait le recrutement lent → rapide
+(seuil par classe, gain global) faute de mesure. Le chantier suivant est **l'ordre de recrutement** : (1) mesures
+primaires d'un seuil ou d'une pulsion de repos par classe (Azevedo 2020 : les lents tirent sous retour
+proprioceptif ; données de courant de seuil si publiées), (2) la non-linéarité limitante du § 9.6 (l'attracteur
+DNg100 ≈ repos persiste), puis (3) rythmicité E1/E2/I1 et alternance sous ce régime.

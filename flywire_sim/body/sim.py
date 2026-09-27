@@ -5,7 +5,8 @@
      (senses.py) ; toutes les `vision_period_ms` : rendu par œil -> photorécepteurs (vision.py), dont la
      sortie est injectée en courant (L1-L3) ou en spikes forcés (R7/R8) à chaque pas
   2. un pas de LIF sur le réseau hybride complet (spikes sensoriels forcés + stimulation expérimentale)
-  3. spikes des motoneurones de patte -> activation musculaire -> ctrl des actionneurs (muscles.py)
+  3. spikes des motoneurones de patte -> unités motrices (secousse, saturation ; motor_units.py) -> ctrl des
+     actionneurs (muscles.py)
   4. forces d'environnement (vent, son) sur les antennes, puis un pas de MuJoCo
 """
 from dataclasses import dataclass, field
@@ -17,9 +18,10 @@ import pandas as pd
 from .. import banc, hybrid
 from ..lif import LIFNetwork, LIFParams, LIFStepper
 from ..network import Network
-from ..size import relative_size
+from ..size import V_REF_NM3, relative_size, volume_nm3
+from . import motor_units
 from .environment import Environment
-from .model import LEGS, build_mjcf
+from .model import LEG_NAME, LEGS, build_mjcf
 from .muscles import Muscles, build_motor_map
 from .senses import Senses
 from .vision import Eyes, build_retinas
@@ -31,6 +33,20 @@ def load_network(min_synapses: int = 5, brain: str = "banc") -> tuple[Network, p
     for c in ("function", "body_part", "cell_type", "side", "super_class", "sub_class", "cls", "region", "bridge"):
         n[c] = n[c].fillna("")
     return net, n
+
+
+def leg_mn_properties(neurons: pd.DataFrame, default_mv: float) -> tuple[np.ndarray, np.ndarray]:
+    """(potentiel de repos, gain d'entrée) par neurone : `default_mv` et 1 partout, sauf les motoneurones de
+    patte (MANC) dont le gradient mesuré lent -> rapide (V_rest -48 -> -68 mV, R_in 700 -> 150 MΩ ; Azevedo
+    2020) est appliqué d'après leur volume officiel (motor_units.py)."""
+    n = neurons.reset_index(drop=True)
+    v_rest, gain = np.full(len(n), default_mv), np.ones(len(n))
+    mn = (n.super_class.eq("motor") & n.body_part.isin(LEG_NAME.values())).to_numpy()
+    vol = volume_nm3(n)
+    ok = mn & np.isfinite(vol) & (vol > 0)
+    v_rest[ok] = motor_units.rest_potential(vol[ok])
+    gain[ok] = motor_units.input_gain(vol[ok], V_REF_NM3)
+    return v_rest, gain
 
 
 @dataclass
@@ -62,8 +78,9 @@ class BodyBrainSim:
         W = banc.clamp_afferents(self.net.W, self.neurons)
         if eln_gain != 1.0:
             W = banc.synaptic_efficacy(W, self.neurons, self.net.sign, eln_gain)
+        v_rest, gain = leg_mn_properties(self.neurons, self.params.v_rest)
         self.lif = LIFNetwork(W, self.params, seed=seed, std_U=banc.depression_U(self.neurons, orn_std_u),
-                              size=relative_size(self.neurons))
+                              size=relative_size(self.neurons), v_rest=v_rest, gain=gain)
         self.stepper: LIFStepper = self.lif.stepper()
         self.model = mujoco.MjModel.from_xml_string(build_mjcf(extra_xml=extra_xml))
         assert abs(self.model.opt.timestep * 1000 - self.params.dt) < 1e-9
