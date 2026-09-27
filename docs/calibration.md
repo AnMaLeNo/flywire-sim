@@ -187,3 +187,137 @@ problème de § 4 (gain DN → MN dans le ganglion ventral, propriétés intrins
   les APL (GABA vérifié), excitées par leurs entrées non-KC. In vivo l'APL est **non impulsionnelle**
   (Papadopoulou 2011, potentiels gradués) ; en LIF ses spikes ne font qu'inhiber les KC (sens conservé),
   mais elle devra passer en neurone gradué comme les photorécepteurs quand l'APL sera traitée.
+
+## 6. Signal moteur faible : enquête à la source et correction de complétude de la moelle
+
+Question posée : avec CALIBRATED_V2, DNg100 à 50 Hz ne recrute les MN de patte qu'à 1–3 Hz. Erreur de
+notre côté (corps, capteurs, conversion), limite des données, ou limite du modèle ?
+
+### 6.1 Côté corps : pas de bug trouvé
+
+- Mapping : 391/391 MN de patte du BANC reliés à un muscle (`body/muscles.py`), aucun non relié.
+- Unités MuJoCo cohérentes (mm, mg, µN·mm) : masse 0,94 mg, couples actifs max des actuateurs 1–6 µN·mm
+  par muscle, posture tenue passivement sous gravité (thorax à 0,79 mm), tripode scripté fonctionnel (PR #1).
+- Conversion spikes → activation (`per_spike` 0,05, τ 30 ms, saturation à 1) : linéaire jusqu'à ~10
+  spikes cumulés — cohérent avec la sommation de twitchs d'un muscle d'insecte ; pas le maillon faible.
+- Capteurs : au repos (mouche posée, sans cerveau) les seuls afférents actifs sont ORN (8 Hz, Hallem &
+  Carlson 2006), organe de Johnston (2–7 Hz, déviation gravitaire), soies tarsales du segment en contact
+  (7,9 Hz soutenu sur 615 neurones), claw (3,7 Hz) et hair plates (4,4 Hz) ; total 35 000 spk/s dont
+  24 000 ORN. Rien d'aberrant.
+
+### 6.2 Localisation : l'étage DN → interneurones de la moelle est sous-alimenté (données)
+
+Comparaison statique des exports officiels Codex, synapses ≥ 5, par super-classe postsynaptique :
+
+| Étage | BANC / référence |
+|---|---|
+| MN ← interneurones VNC | 0,92 (réf. MANC) |
+| MN ← DN | 1,02 (réf. MANC) |
+| MN ← afférents | 0,99 (réf. MANC) |
+| IN VNC ← IN, ← DN, ← afférents, ← AN | 0,21–0,23 (réf. MANC), homogène sur 36 hémilignées (0,08–0,36) |
+| sorties des DN dans la moelle | 0,30 (réf. MANC) |
+| entrées des neurones du cerveau central | ~0,3 (réf. FAFB) |
+
+Les entrées des motoneurones sont complètes ; c'est la couche prémotrice qui manque de synapses : un IN
+VNC du BANC reçoit 319 synapses (24,5 partenaires) contre 1 309 (75,7 partenaires) dans le MANC. Le
+papier BANC le dit : 18 % des synapses ont leurs deux extrémités identifiées, contre 42–44 % pour
+FAFB/MANC. L'export BANC est déjà seuillé à 3 synapses par paire : aucune connexion « cachée » à
+récupérer. Le poids unitaire de Shiu 2024 (0,275 mV) a été calibré sur les comptes FAFB : appliqué aux
+comptes BANC de la moelle, la couche prémotrice est sous-alimentée ~4×. Ce n'est ni un bug du corps ni un
+paramètre LIF : c'est une limite de complétude de la reconstruction.
+
+Vérifications dynamiques (LIF homogène, mêmes paramètres, sans corps) :
+
+| Réseau | DNg100 à 50 Hz → IN VNC | → MN patte |
+|---|---|---|
+| BANC brut | 0,1 Hz | 1,9 Hz (13 % actifs) |
+| MANC (référence, même LIF) | 7,5 Hz (14 % actifs) | 12,3 Hz (19 % actifs) |
+
+Le même modèle, avec les comptes de la moelle d'un connectome plus complet, produit le recrutement
+attendu : le déficit est bien dans les comptes.
+
+### 6.3 Correction retenue : rééchelonnage par neurone des entrées de la moelle (`completeness.py`)
+
+Principe : pour chaque interneurone de la moelle (super-classe `ventral_nerve_cord_intrinsic`), ratio = entrées BANC / médiane des entrées de son type cellulaire dans le MANC (repli :
+hémilignée, puis super-classe) ; facteur = 1/ratio borné à [1, 3] ; toutes les entrées existantes du
+neurone sont multipliées par ce facteur. **Aucune connexion ajoutée ni retirée** (support de la matrice
+identique, signes conservés — `tests/test_completeness.py`) ; motoneurones et afférents inchangés
+(entrées complètes), neurones ascendants inchangés (§ 6.5). Le cerveau n'est pas corrigé (§ 6.4). Le MANC ne sert que de référence de comptes ;
+le réseau simulé reste le BANC.
+
+Choix du plafond (3) : les synapses manquantes sont surtout des **partenaires manquants** (0,32× de
+paires) plus que des paires sous-comptées (0,75× de synapses par paire). Multiplier les paires
+récupérées reporte tout le poids manquant sur elles : avec le facteur statique complet (médiane 5,3,
+plafond 10) 88 % du poids entrant d'un IN est porté par des paires ≥ 26 synapses-équivalents (une seule
+présynaptique suffit à faire tirer le neurone) contre 51 % dans le MANC. Le réseau s'embrase alors dès
+qu'un afférent tire. On a donc cherché le plafond qui reproduit la dynamique de la référence MANC dans
+les deux régimes (essais avec IN **et** AN corrigés, sans corps) (drive sensoriel de repos synthétique : 20 % des soies de patte à 8 Hz, hair plates 4 Hz,
+40 % des chordotonaux 4 Hz ; et DNg100 à 50 Hz) :
+
+| Plafond | repos sensoriel → IN VNC / MN | DNg100 → IN VNC / MN |
+|---|---|---|
+| 1 (brut) | 0,0 / 0,0 Hz | 0,1 / 1,9 Hz |
+| 1,5 | 0,0 / 0,0 | 0,3 / 1,1 |
+| 2 | 0,0 / 0,0 | 4,1 (13 %) / 3,9 (27 %) |
+| **3** | **0,2 (6 %) / 0,1 (10 %)** | **6,1 (20 %) / 6,4 (39 %)** |
+| 4 | embrasement à 800 ms | 7,8 / 8,9 |
+| 10 | embrasement (16 / 21 Hz) | embrasement |
+| MANC (référence) | 0,3 (6 %) / 0,6 (12 %) | 7,5 (14 %) / 12,3 (19 %) |
+
+Le plafond est une grandeur de calibration explicite (incertaine, 2–3 acceptables, 4 instable), pas une
+mesure biologique : c'est documenté comme tel.
+
+### 6.4 Pourquoi le cerveau n'est pas corrigé
+
+La même méthode avec le FAFB comme référence (facteurs médians 2,0 DN, 2,8 cerveau central) rend le
+cerveau instable sous DNg100 seul (DN 39 % actifs), alors que le FAFB lui-même, simulé avec le même LIF,
+reste silencieux dans cette condition. Deux raisons mesurées : (1) la récupération du BANC est biaisée
+vers l'excitation (entrées inhibitrices récupérées 0,87× moins que les excitatrices : part inhibitrice
+des entrées du cerveau central 0,35 contre 0,39 dans le FAFB) ; (2) la médiane par type surestime la
+cible pour des types très divergents entre datasets (APL : 3 900 entrées BANC contre 44 000–50 000 FAFB →
+saturation). Le cerveau BANC brut est stable avec tous les capteurs (§ 5.4) et sa voie DNg100 → moelle
+est complète côté sorties directes sur les MN ; on le laisse tel quel. Dans la moelle, la récupération
+n'est pas biaisée vers l'excitation (part inhibitrice 0,51 contre 0,46 dans le MANC).
+
+### 6.5 Avec le corps et tous les capteurs : les ascendants ne doivent pas être corrigés
+
+Boucle complète (corps MuJoCo, tous les capteurs, 1 s, `banc_al_gain.py`) :
+
+| Correction (plafond 3) | Repos : total / DN / MN patte | DNg100 à 50 Hz : DN / MN patte |
+|---|---|---|
+| aucune (§ 5.4) | 49 000 spk/s / 0,2 Hz (1 %) / 0,3 Hz (3 %) | 0,4 Hz / 1,4 Hz (13 %) |
+| IN VNC + ascendants | 253 000 / 12,7 Hz (21 %) / 6,8 Hz (32 %) | 14,6 Hz (24 %) / 6,9 Hz (34 %) |
+| **IN VNC seulement** | **56 000 / 0,2 Hz (1 %) / 2,0 Hz (23 %)** | **0,4 Hz (3 %) / 2,5 Hz (25 %)** |
+
+Avec les ascendants corrigés ×3, les afférents de repos (soies tarsales, JO, ORN) suffisent à fermer une
+boucle moelle → AN → cerveau → DN → moelle : 21 % des DN tirent à 12 Hz au repos et DNg100 n'ajoute
+plus rien (ablations : pattes seules ou tout sauf les pattes donnent le même régime). Le « 6,4 Hz » du
+tableau § 6.3 était donc surtout ce recrutement de tout le cerveau descendant, pas la voie DNg100 → MN.
+In vivo les DN sont majoritairement silencieux au repos ; on ne corrige donc que les interneurones
+intrinsèques de la moelle. Résultat : repos silencieux côté DN, MN de patte toniques à 2 Hz sur 23 %
+(compatible avec l'activité tonique des MN lents de posture, Azevedo 2020), DNg100 → MN 2,5 Hz (25 %)
+au lieu de 1,4 Hz. Le gain reste modeste, et la raison est mesurable : les sorties de DNg100 dans le
+BANC comptent 407 interneurones cibles (8 500 synapses) contre 834 (22 400) dans le MANC, alors que ses
+cibles motrices directes sont complètes (136 MN / 2 270 synapses contre 111 / 1 680). Le déficit est fait
+de **partenaires absents** ; rééchelonner les entrées existantes des cibles récupérées ne les recrée pas,
+et le faire plus fort (plafond ≥ 4, ou ascendants) embrase le reste. On est à la limite de ce que la
+complétude du BANC permet pour cette voie.
+
+Boucle corps-cerveau (`body_brain_loop.py`, 1 s, IN VNC corrigés) : repos 88/391 MN de patte actifs à
+9 Hz ; DNg100 97/391 à 10 Hz ; 43 types DN « marche » 148/391 à 20 Hz (activation musculaire moyenne
+0,04, tibia extensor dominant). Posture tenue, pas de rythme de pas ni de déplacement : la faiblesse
+neuronale (§ 6.5) et l'absence de classes de MN / de twitch (§ 6.6) restent à traiter avant la marche.
+
+### 6.6 Ce qui reste (dans l'ordre)
+
+1. **Décision données** : garder la moelle BANC (voie DNg100 → prémoteurs à ~0,4× de la référence, non
+   récupérable sans ajouter de connexions) ou brancher la moelle MANC (mâle, complète) sous le cerveau
+   BANC — c'est un changement de source, pas un réglage.
+2. Classes de MN lents / intermédiaires / rapides (Azevedo 2020 : R_in 700 / 300 / 150 MΩ, recrutement
+   par taille, MN lents toniques ~30 Hz) : le LIF homogène ne les distingue pas ; les MN annotés par
+   muscle dans le BANC permettent de les typer.
+3. Inhibition présynaptique des afférents : 92–99 % des synapses reçues par les axones sensoriels de patte
+   sont GABAergiques (BANC) ; elles sont pour l'instant supprimées (`clamp_afferents`) au lieu de moduler
+   la libération (Dallmann 2025 : inhibition présynaptique sélective des propriocepteurs pendant la marche).
+4. Muscle : twitch avec montée physiologique, sommation, saturation et force par classe (Azevedo 2020),
+   à ne régler qu'une fois l'étage neuronal validé.

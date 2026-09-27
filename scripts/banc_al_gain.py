@@ -93,6 +93,7 @@ def main() -> None:
     ap.add_argument("--tau-rec", type=float, default=banc.ORN_TAU_REC, help="récupération de la dépression ORN (ms)")
     ap.add_argument("--senses", nargs="*", default=None,
                     help=f"groupes de capteurs actifs ({', '.join(SENSE_GROUPS)} ; vide = aucun) ; défaut : tous")
+    ap.add_argument("--no-completeness", action="store_true", help="sans correction de complétude BANC")
     ap.add_argument("--out", default="results/al_gain.txt")
     args = ap.parse_args()
     env = None
@@ -100,12 +101,13 @@ def main() -> None:
         env = Environment(odor_sources=[OdorSource(np.array([1.0, 2.0, 0.5]), {"yeasty": 1.0}, radius=2.0)])
     lines = []
     for name, u, g in itertools.product(args.params, args.orn_u, args.eln_gain):
-        sim = BodyBrainSim(params=replace(PARAMS[name], tau_rec=args.tau_rec), orn_std_u=u, eln_gain=g, env=env)
+        sim = BodyBrainSim(params=replace(PARAMS[name], tau_rec=args.tau_rec), orn_std_u=u, eln_gain=g, env=env,
+                           completeness_correction=not args.no_completeness)
         if args.senses is not None:
             sim.senses.enabled = enabled_keys(sim, args.senses)
         stim = sim.find(super_class="descending", cell_type=args.dn) if args.dn else None
         sim.run(args.ms, stim_idx=stim, stim_rate_hz=args.rate, spike_log=True)
-        tag = f"[{name} U_ORN={u} tau_rec={args.tau_rec:g} gain_eLN={g}" + (
+        tag = f"[{name} U_ORN={u} tau_rec={args.tau_rec:g} gain_eLN={g}" + (" sans-complétude" if args.no_completeness else "") + (
             f" capteurs={'+'.join(args.senses) or 'aucun'}" if args.senses is not None else "") + (f" DN={'+'.join(args.dn)}@{args.rate:g}Hz" if args.dn else "") + (" odeur" if args.odor else "") + "] "
         line = tag + report(sim, args.ms, args.top)
         print(line, flush=True)

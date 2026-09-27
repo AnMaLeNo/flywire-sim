@@ -30,4 +30,11 @@ BANC="https://storage.googleapis.com/flywire-data/codex/data/banc/888"
 for f in neurons.csv.gz connections_princeton.csv.gz neuron_attributes.pickle.gz; do
   [ -s "$RAW/banc888/$f" ] || curl -sSL -o "$RAW/banc888/$f" "$BANC/$f"
 done
+# MANC v1.2.1 (moelle mâle, Janelia ; export statique Codex) : référence de complétude des synapses de la
+# moelle du BANC (flywire_sim/completeness.py), jamais simulé
+mkdir -p "$RAW/manc121"
+MANC="https://storage.googleapis.com/flywire-data/codex/data/manc/1.2.1"
+for f in neurons.csv.gz connections_princeton.csv.gz; do
+  [ -s "$RAW/manc121/$f" ] || curl -sSL -o "$RAW/manc121/$f" "$MANC/$f"
+done
 echo "OK -> $RAW"
