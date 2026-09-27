@@ -95,22 +95,32 @@ Limites à garder en tête : rates absolus non calibrés, pas de modulation (dop
 synapses électriques, pas d'états internes (faim), le côté contra > ipsi n'est pas attendu
 biologiquement (à creuser : conventions gauche/droite de l'imagerie FAFB, qui est en miroir).
 
-## Étape 2 (à discuter) : brancher un corps
+## Étape 2 : le corps (v0, `flywire_sim/body/`)
 
-Le cerveau FlyWire s'arrête au cou : **les motoneurones des pattes et des ailes sont dans le
-ganglion ventral (VNC)**, qui n'est pas dans FAFB. Ce qui sort du cerveau vers le corps :
-1 303 **neurones descendants** (DN) → VNC, et 110 motoneurones de la tête (proboscis, antennes,
-cou, yeux). Ce qui rentre : ~17 k neurones sensoriels (vision 77 k neurones optiques, olfaction,
-goût, mécanosensation, …).
+Conception détaillée dans `docs/conception_corps.md`. En résumé :
 
-Pistes concrètes pour le corps :
-- Interface capteurs → cerveau : caméra virtuelle → photorécepteurs (R1-R8, 2 × ~800 colonnes) ;
-  odeurs → ORN ; contact patte / labellum → GRN ; vent / son → JON (organe de Johnston).
-- Interface cerveau → corps : lire les DN connus (ex. DNa02 = virage, DNp09 = avance,
-  MDN = recul, DNge = tête) et les motoneurones de la tête, les mapper sur un contrôleur de
-  locomotion du corps 3D (le VNC réel n'est pas simulé ; à terme, FlyWire publie aussi
-  BANC/MANC = cerveau + VNC, ce qui permettrait de descendre jusqu'aux muscles des pattes).
-- Moteur 3D : Python (ce simulateur) + moteur de jeu séparé (Godot ou Unity/Bevy) qui parle au
-  cerveau via socket / mémoire partagée, ou tout en Rust (Bevy) avec le simulateur porté
-  (matrice sparse + LIF sont ~200 lignes, portables facilement, et un backend GPU est possible).
-  Le choix se fera à l'étape 2.
+- **Système nerveux complet** : réseau **BANC v888** (cerveau + ganglion ventral de la même femelle,
+  export officiel Codex, `flywire_sim/banc.py`), 158 262 neurones. Les motoneurones des pattes y sont
+  annotés muscle par muscle et les neurones sensoriels organe par organe.
+- **Corps MuJoCo** (`body/model.py`) : MJCF généré par nous (arbre cinématique, 82 DoF, muscles,
+  adhésion tarsale, capteurs, collisions), **sans ailes** ; formes, masses et positions d'articulations
+  issues d'un **scan micro-CT** d'une femelle adulte (maillages NeuroMechFly, Apache-2.0,
+  `body/meshes/`). Unités mm/g/s, pas de 0,1 ms.
+- **Muscles** (`body/muscles.py`) : les 391 motoneurones de patte du BANC sont reliés chacun à
+  l'actionneur portant le nom de leur muscle ; chaque spike produit une secousse (twitch).
+- **Sens** (`body/senses.py`) : angles, vitesses, charge et contacts des pattes → 4 305 neurones
+  sensoriels de patte du BANC (hair plates, organes chordotonaux claw/hook/club, campaniformes,
+  soies tactiles, soies gustatives sucre) en spikes Poisson.
+- **Boucle fermée** (`body/sim.py`) : capteurs → spikes → un pas de LIF → spikes MN → muscles →
+  un pas de MuJoCo.
+
+```bash
+PYTHONPATH=. .venv/bin/python scripts/body_stand_test.py        # debout sous gravité + images
+PYTHONPATH=. .venv/bin/python scripts/body_muscle_test.py --video   # tripode scripté (sans cerveau)
+PYTHONPATH=. .venv/bin/python scripts/body_brain_loop.py --duration 200 --video  # cerveau BANC + corps
+PYTHONPATH=. .venv/bin/pytest tests
+```
+
+État : elle tient debout ; les muscles scriptés la font avancer ; en boucle fermée les DN de marche
+recrutent bien les motoneurones des 6 pattes mais à des taux trop élevés (co-contraction : elle se
+raidit au lieu de marcher). Prochaine étape : calibrer la dynamique du ganglion ventral.

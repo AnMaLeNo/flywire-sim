@@ -9,12 +9,11 @@ et BANC). Toutes les études citées ci-dessous portent sur cette espèce.*
 |---|---|---|
 | Système nerveux | Passer de FAFB v783 (cerveau seul) au **BANC v888** (cerveau **+ moelle** = ganglion ventral, même mouche, publié par FlyWire/Harvard en 2025-2026, export officiel Codex) | Les motoneurones des pattes, du cou, de l'abdomen sont dans le ganglion ventral, absent de FAFB. Le BANC contient les 805 motoneurones **annotés muscle par muscle** et 17 000 neurones sensoriels **annotés organe par organe** : l'interface cerveau↔corps est donnée par les chercheurs, pas inventée. |
 | Moteur physique | **MuJoCo** (C, Apache-2.0, Google DeepMind ; wheels Python Linux/macOS/Windows) | Corps articulés + contacts stables au pas de 0,1 ms à l'échelle du millimètre, actionneurs d'adhésion (pattes qui collent), tendons, muscles. Moteur générique, ce n'est pas un simulateur de mouche. |
-| Corps | **Notre propre modèle** (fichier MJCF généré par script depuis les mesures publiées : longueurs de segments, masses, degrés de liberté, muscles) | Respecte la règle « on refait tout » : on ne réutilise pas les assets d'un simulateur de mouche existant, seulement les mesures et descriptions des articles. |
+| Corps | **Notre propre modèle MJCF** (arbre cinématique, degrés de liberté, muscles, adhésion, capteurs, collisions écrits par nous), mais **formes et dimensions issues d'un vrai scan micro-CT** : maillages et origines de segments de NeuroMechFly (Lobato-Rios et al. 2022, femelle adulte de *D. melanogaster*, licence Apache-2.0, `flywire_sim/body/meshes/`). Aucun code, contrôleur ou paramètre de simulation de ce projet n'est repris. | Décision validée : un scan micro-CT réel est plus fidèle que toute reconstruction à partir de primitives (longueurs, masses par segment, positions exactes des articulations). |
 | Langage | **Python** (numpy/scipy + mujoco) pour la v0, comme le cerveau. Portage Rust/GPU des boucles chaudes plus tard si nécessaire | Une seule pile pour cerveau + corps + capteurs ; itération rapide. Le « jeu » (rendu 3D, caméra, interactions) viendra par-dessus (viewer MuJoCo d'abord, moteur de jeu ensuite via socket). |
 | Ailes | **Amputées** : ailes retirées du corps, les ~950 neurones sensoriels des ailes/tegula/base d'aile ne reçoivent rien, les MN des ailes sont libres mais n'actionnent rien (haltères conservés, ils ne battent qu'en vol) | Correspond à une manipulation expérimentale classique (« wing clipping ») dont les effets comportementaux sont documentés ; les circuits de vol restent intacts dans le cerveau mais sans effet mécanique. |
 
-Deux points où j'ai besoin de ton accord : (1) MuJoCo comme moteur physique générique ; (2) le corps
-construit par nous à partir des mesures publiées (pas de réutilisation d'un modèle 3D existant).
+Décisions validées : MuJoCo ; géométrie micro-CT autorisée si on ne peut pas faire mieux (c'est le cas).
 
 ## 1. L'animal : ordres de grandeur
 
@@ -78,10 +77,11 @@ etc. Notre travail est de fournir le corps qui ferme la boucle.
 
 ## 3. Le corps à construire (sans vol)
 
-1. **Squelette rigide** (MJCF) : tête (avec proboscis 2 segments + labellum, antennes 3 segments,
-   yeux), cou (3 DoF), thorax, abdomen (chaîne de 3–4 segments souples), 6 pattes × (coxa,
-   trochanter, fémur, tibia, tarse 5 tarsomères, pré-tarse). Longueurs/masses depuis §1 et la
-   littérature morphométrique ; inertie calculée par MuJoCo à partir des volumes.
+1. **Squelette rigide** (MJCF généré par `flywire_sim/body/model.py`) : tête (proboscis 2 segments,
+   antennes 3 segments, yeux), cou (3 DoF), thorax, abdomen (5 segments, 4 DoF), 6 pattes ×
+   (coxa 3 DoF, trochantérofémur 2 DoF, tibia 1 DoF, tarse 1 DoF + 4 tarsomères passifs), haltères
+   conservés, **ailes absentes**. Géométrie et masses : scan micro-CT (v0 réalisée : 68 segments,
+   82 DoF, 0,94 mg, unités mm/g/s). Collisions : capsules sur les pattes, ellipsoïdes sur le corps.
 2. **Muscles** : un actionneur par muscle annoté dans le BANC (≈ 14–18 par patte, ~40 tête/cou/
    trompe, abdominaux). Modèle : chaque spike de MN ajoute un « twitch » (montée ~5–10 ms,
    décroissance 20–40 ms pour les lents, plus rapide pour les rapides) ; l'activation somme les MN
@@ -130,11 +130,15 @@ si cet effet **émerge** du connectome (bon test de réalisme).
 
 ```
  flywire_sim/           cerveau+moelle (BANC, LIF numpy/scipy, dt=0.1 ms)   ← existe
- flywire_sim/body/      MJCF généré (morphométrie), muscles, adhésion        ← v0
- flywire_sim/senses/    encodeurs corps→spikes par modalité                  ← v0 (proprio, toucher, goût) puis vision/odeur
- flywire_sim/interoception/  hémolymphe (sucre, eau, O2), température        ← v1
- flywire_sim/embodied.py    boucle : spikes MN → muscles → MuJoCo.step → capteurs → spikes sensoriels
- scripts/run_embodied.py    scène 3D (sol, objets, gouttes de sucre), viewer MuJoCo, enregistrement
+ flywire_sim/lif.py           LIFStepper : intégration pas à pas pour boucler avec le corps   ← fait
+ flywire_sim/body/model.py    MJCF généré (micro-CT + DoF + muscles + capteurs), sans ailes     ← fait (v0)
+ flywire_sim/body/muscles.py  MN BANC (391 MN de patte, nommés par muscle) → twitch → actionneurs ← fait (v0)
+ flywire_sim/body/senses.py   capteurs → 4 305 neurones sensoriels de patte (proprio, charge, toucher, sucre) ← fait (v0)
+ flywire_sim/body/sim.py      boucle fermée : capteurs → spikes → LIF → spikes MN → muscles → MuJoCo ← fait (v0)
+ flywire_sim/interoception/   hémolymphe (sucre, eau, O2), température                          ← v1
+ scripts/body_stand_test.py   posture debout sous gravité + rendu
+ scripts/body_muscle_test.py  tripode scripté sur les muscles (sans cerveau) → avance
+ scripts/body_brain_loop.py   expérience cerveau+corps : stimulation des DN de marche
 ```
 Boucle temps : cerveau dt = 0,1 ms (158 k neurones ≈ 4–5 s de calcul / s simulée sur CPU),
 physique dt = 0,1–0,2 ms, échange cerveau↔corps toutes les 1 ms. Cible v0 : ~5–10× plus lent que
@@ -160,11 +164,22 @@ de sucre, d'obstacles) sera une couche au-dessus, moteur de jeu à choisir quand
   option de repli : greffer la moelle BANC sous le cerveau FAFB via les neurones descendants
   (le BANC fournit les correspondances `fafb_cell_type`).
 
+### État v0 (corps)
+
+- Debout sous gravité sans muscle (ressorts articulaires passifs) : 6 tarses au sol, force de contact
+  totale = poids, hauteur du thorax ≈ 0,8 mm.
+- Tripode scripté sur les muscles nommés BANC (boucle ouverte) : avance de 5 mm en 2 s (2,5 mm/s ;
+  réel 10–30 mm/s) sans basculer → les signes/couples des muscles sont plausibles, à affiner.
+- Boucle fermée BANC ↔ corps (200 ms, 43 DN « marche » à 20 Hz, w=0,21, adaptation 3 mV) : les
+  391 MN de patte sont tous reliés à un actionneur, 364 tirent (~180 Hz) → co-contraction
+  généralisée (activation moyenne 0,54) : la mouche se raidit et se dresse, ne marche pas encore.
+  Cause : dynamique VNC non calibrée (§7), pas le corps. Tests : `tests/test_body.py`.
+
 ## 8. Plan
 
 | Étape | Contenu | Estimation |
 |---|---|---|
-| v0 « elle tient debout et bouge les pattes » | calibration BANC ; MJCF corps (pattes 7 DoF, tête, abdomen) ; muscles ← MN ; adhésion ; proprio (FeCO, hair plates, campaniformes) + toucher pattes → spikes ; scène sol plat ; stimulation des DN de marche ; viewer | 1–2 sessions |
+| v0 « elle tient debout et bouge les pattes » | ~~MJCF corps (pattes 7 DoF, tête, abdomen) ; muscles ← MN ; adhésion ; proprio + toucher pattes → spikes ; scène sol plat ; stimulation des DN de marche~~ **fait** ; reste : calibration BANC (rythme de marche dans le VNC), viewer interactif | 1 session |
 | v1 « elle se nourrit et explore » | goût (labellum/pattes), hémolymphe (faim), proboscis, olfaction (champs d'odeur), antennes/JO (vent, gravité), thermo | 1 session |
 | v2 « elle voit » | rendu par œil → photorécepteurs (2 × ~800 ommatidies), ocelles ; sommeil/horloge ; O₂/CO₂ optionnel | 1–2 sessions |
 | v3 « jeu » | caméra libre, outils d'expérience (déposer sucre/odeur/obstacle, pincer une patte), export mac/win | 1 session |
