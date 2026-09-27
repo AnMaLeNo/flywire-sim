@@ -99,25 +99,30 @@ biologiquement (à creuser : conventions gauche/droite de l'imagerie FAFB, qui e
 
 Conception détaillée dans `docs/conception_corps.md`. En résumé :
 
-- **Système nerveux complet** : réseau **BANC v888** (cerveau + ganglion ventral de la même femelle,
-  export officiel Codex, `flywire_sim/banc.py`), 158 262 neurones. Les motoneurones des pattes y sont
-  annotés muscle par muscle et les neurones sensoriels organe par organe.
+- **Système nerveux** : réseau **hybride** (`flywire_sim/hybrid.py`, 156 735 neurones) = cerveau du
+  **BANC v888** (femelle, export officiel Codex, `flywire_sim/banc.py`) + ganglion ventral du **MANC v1.2.1**
+  (mâle, Janelia, export officiel Codex, `flywire_sim/manc.py`), reliés par 2 949 neurones descendants /
+  ascendants appariés par type cellulaire et côté ; aucune connexion inventée, chaque synapse vient d'un
+  des deux exports (`docs/calibration.md` § 7). Deux animaux différents : ce n'est pas le connectome
+  d'une seule mouche. Les motoneurones des pattes du MANC sont annotés muscle par muscle ; les
+  neurones sensoriels du MANC reçoivent leur organe par transfert des annotations BANC (même type).
 - **Corps MuJoCo** (`body/model.py`) : MJCF généré par nous (arbre cinématique, 82 DoF, muscles,
   adhésion tarsale, capteurs, collisions), **sans ailes** ; formes, masses et positions d'articulations
   issues d'un **scan micro-CT** d'une femelle adulte (maillages NeuroMechFly, Apache-2.0,
   `body/meshes/`). Unités mm/g/s, pas de 0,1 ms.
-- **Muscles** (`body/muscles.py`) : les 391 motoneurones de patte du BANC sont reliés chacun à
-  l'actionneur portant le nom de leur muscle ; chaque spike produit une secousse (twitch).
-- **Sens** (`body/senses.py`) : angles, vitesses, charge et contacts des pattes → 4 305 neurones
-  sensoriels de patte du BANC (hair plates, organes chordotonaux claw/hook/club, campaniformes,
-  soies tactiles, soies gustatives sucre) en spikes Poisson.
+- **Muscles** (`body/muscles.py`) : 330 des 396 motoneurones de patte du MANC sont reliés chacun à
+  l'actionneur portant le nom de leur muscle (66 n'ont pas de muscle nommé dans l'export) ; chaque spike
+  produit une secousse (twitch).
+- **Sens** (`body/senses.py`) : angles, vitesses, charge et contacts des pattes → 3 650 neurones
+  sensoriels de patte du MANC (hair plates, organes chordotonaux claw/hook/club, campaniformes,
+  soies tactiles, soies gustatives) en spikes Poisson ; les sens de la tête restent ceux du BANC.
 - **Boucle fermée** (`body/sim.py`) : capteurs → spikes → un pas de LIF → spikes MN → muscles →
   un pas de MuJoCo.
 
 ```bash
 PYTHONPATH=. .venv/bin/python scripts/body_stand_test.py        # debout sous gravité + images
 PYTHONPATH=. .venv/bin/python scripts/body_muscle_test.py --video   # tripode scripté (sans cerveau)
-PYTHONPATH=. .venv/bin/python scripts/body_brain_loop.py --duration 200 --video  # cerveau BANC + corps
+PYTHONPATH=. .venv/bin/python scripts/body_brain_loop.py --duration 200 --video  # cerveau BANC + moelle MANC + corps
 PYTHONPATH=. .venv/bin/pytest tests
 ```
 
@@ -126,6 +131,8 @@ sont branchés au corps (`docs/capteurs.md`). Régime `banc.CALIBRATED_V2` (`doc
 paramètres de Shiu 2024, signes GABA/glutamate/histamine vérifiés, afférents clampés, synapses
 eLN → PN électriques atténuées, dépression ORN → PN) : avec tous les capteurs actifs le cerveau reste
 stable (fond ~0 Hz hors lobe antennaire, cellules de Kenyon muettes au repos) et les neurones descendants
-« marche » recrutent les motoneurones de patte, mais faiblement (1–3 Hz). Elle ne marche pas encore : le
-gain DN → MN et le rythme de pas restent à obtenir dans le ganglion ventral (`scripts/banc_al_gain.py`,
+« marche » recrutaient les motoneurones de patte faiblement (1–3 Hz) avec la moelle BANC, sous-complète
+(`docs/calibration.md` § 6). Avec la moelle MANC, DNg100 → MN de patte atteint la référence (11 Hz,
+19–24 % des MN), mais une boucle moelle → ascendants → cerveau → descendants s'auto-entretient
+(§ 7 : déficit d'inhibition sur les DN dans l'export BANC). Elle ne marche pas encore (`scripts/banc_al_gain.py`,
 `scripts/banc_calibrate.py`, `scripts/banc_walk_analysis.py`).

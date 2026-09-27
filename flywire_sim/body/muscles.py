@@ -1,7 +1,7 @@
-"""Interface motoneurones BANC -> muscles MuJoCo.
+"""Interface motoneurones -> muscles MuJoCo.
 
-Chaque motoneurone de patte du BANC porte le nom du muscle qu'il innerve (`Primary Cell Type`, atlas
-Azevedo et al. 2024 / Lesser et al. 2024), sa patte (`Body Part`) et son côté (`Soma side`). On le relie
+Chaque motoneurone de patte (MANC dans le réseau hybride, mêmes noms que le BANC) porte le nom du muscle qu'il
+innerve (`Primary Cell Type`, atlas Azevedo et al. 2024 / Lesser et al. 2024), sa patte et son côté. On le relie
 à l'actionneur `<côté><patte>_<muscle>` du modèle. Un spike de MN produit une secousse (twitch) : la force
 musculaire est modélisée par une activation en [0, 1] qui saute de `per_spike` à chaque spike et
 décroît avec `tau_ms` (dynamique calcium/pont actine-myosine simplifiée, ~20-40 ms chez l'insecte).
@@ -25,7 +25,7 @@ class MotorMap:
 
 
 def build_motor_map(model: mujoco.MjModel, neurons: pd.DataFrame) -> MotorMap:
-    """`neurons` : table BANC alignée sur les indices du réseau (une ligne par neurone, dans l'ordre)."""
+    """`neurons` : table des neurones alignée sur les indices du réseau (une ligne par neurone, dans l'ordre)."""
     n = neurons.reset_index(drop=True)
     is_mn = n.super_class.eq("motor") & n.body_part.isin(LEG_NAME.values())
     inv_leg = {v: k for k, v in LEG_NAME.items()}

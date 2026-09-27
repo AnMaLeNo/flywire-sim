@@ -321,3 +321,81 @@ neuronale (§ 6.5) et l'absence de classes de MN / de twitch (§ 6.6) restent à
    la libération (Dallmann 2025 : inhibition présynaptique sélective des propriocepteurs pendant la marche).
 4. Muscle : twitch avec montée physiologique, sommation, saturation et force par classe (Azevedo 2020),
    à ne régler qu'une fois l'étage neuronal validé.
+
+## 7. Moelle MANC sous le cerveau BANC (réseau hybride, `flywire_sim/hybrid.py`)
+
+Décision prise après § 6 : la moelle simulée n'est plus celle du BANC (interneurones à ~0,2× de leurs
+synapses) mais le **MANC v1.2.1** (Janelia, export officiel Codex `flywire-data/codex/data/manc/1.2.1`,
+`scripts/download_data.sh`), connectome **complet** du ganglion ventral d'un **mâle**. Le cerveau reste
+le **BANC v888** (femelle). C'est un changement de source de données, pas un réglage, et l'assemblage
+est un **hybride de deux animaux** (sexes différents, individus différents) : il ne doit pas être présenté
+comme le connectome d'une seule mouche. La correction de complétude (§ 6.3, `completeness.py`) disparaît.
+
+### 7.1 Règles d'assemblage (`hybrid.build`)
+
+| Étape | Règle | Effectif |
+|---|---|---|
+| Cerveau | tous les neurones BANC sauf ceux résidant dans la moelle (`vnc_resident` : IN du VNC, MN, afférents et neurones dont la région annotée est le VNC, hors classes pontées) | 133 070 gardés (dont 403 DN, 253 AN, 80 sensoriels ascendants sans homologue MANC : ils gardent leurs connexions cérébrales, aucune moelle) |
+| Moelle | le MANC entier (`manc.py` : colonnes renommées au schéma BANC, super-classes harmonisées, côté depuis `Sub Class`/`Nerve`/`Soma side`, `body_part` des MN depuis `Class`, des afférents depuis `Sub Class`) | 23 665 neurones, 1 372 588 paires ≥ 5 synapses |
+| Pont | DN, AN, sensoriels ascendants et efférents ascendants appariés par **(super_class, cell_type, side)** ; k = min(n_BANC, n_MANC) paires fusionnées en un noeud (entrées cérébrales BANC + sorties/entrées de la moelle MANC) | **2 949 fusions** : 913 DN, 1 596 AN, 436 sensoriels ascendants, 4 efférents |
+| Non appariés MANC | restent dans la moelle **sans aucune connexion cérébrale** (`bridge == "unpaired"`) | 784 : 415 DN, 266 AN, 99 sensoriels ascendants, 4 ; 488 sont des surnuméraires d'un type présent des deux côtés, 296 d'un type absent du BANC |
+| Connexions | somme des deux matrices officielles ré-indexées ; **aucune synapse ajoutée** — `tests/test_hybrid.py` tire 4 000 entrées de W et vérifie que chacune est une paire (pré, post) de l'export BANC ou de l'export MANC | 156 735 noeuds, 2 452 560 entrées |
+| Signes | chaque connexion garde le signe du jeu dont elle vient (NT prédit BANC pour les synapses cérébrales, MANC pour la moelle ; MN forcés excitateurs) ; 153/2 949 fusionnés ont un NT prédit différent dans les deux jeux — conservés tels quels, pas d'arbitrage silencieux | |
+| Afférents MANC | annotés au niveau classe seulement (`chordotonal_organ`, `hair_plate`, `taste_bristle`…) ; l'organe et la fonction (claw/hook/club, plaques pilifères, soies, sucre/amer/…) sont **transférés depuis le BANC par `cell_type`** (annotation majoritaire du type ; pureté médiane 0,99) | 3 650 afférents de patte MANC branchés au corps par organe |
+| MN de patte MANC | mêmes noms de muscle que le BANC pour 17 types → reliés aux actionneurs sans changer `muscles.py` ; les 36 types `MNfl10`, `MNml76–86`, `MNhl59–75`… n'ont pas de muscle nommé dans l'export | **330/396 reliés**, 66 non reliés (listés au démarrage de `body_brain_loop.py`), aucun mapping inventé |
+
+Un premier essai copiait aux DN/AN surnuméraires les entrées ou sorties cérébrales d'un frère du même type
+(« copy_in/copy_out »). Retiré : c'est une connexion dérivée, non présente dans un export, et son effet
+mesuré était < 5 % sur tous les taux.
+
+### 7.2 Résultats, réseau seul (`scripts/hybrid_regimes.py`, CALIBRATED_V2, 500 ms, sans capteurs)
+
+| Réseau | total spk/s | DN | AN | IN VNC | MN patte | MN aile |
+|---|---|---|---|---|---|---|
+| MANC seul, DNg100 (2) à 50 Hz | 112 000 | 0,6 Hz | 3,3 Hz (8 %) | 6,6 Hz (14 %) | **10,8 Hz (19 %)** | 23,7 Hz (48 %) |
+| Hybride, repos | 0 | 0 | 0 | 0 | 0 | 0 |
+| Hybride, DNg100 à 50 Hz | 237 000 | **11,3 Hz (17 %)** | 7,9 Hz (14 %) | 5,5 Hz (18 %) | 7,8 Hz (24 %) | **109 Hz (73 %)** |
+| idem, AN → cerveau/DN coupé | 55 000 | 0,2 Hz | 1,9 Hz | 3,3 Hz | 4,9 Hz (24 %) | 13 Hz |
+| idem, cerveau/AN → DN coupé | 139 000 | 0,4 Hz | 3,5 Hz | 6,6 Hz | 10,6 Hz (24 %) | 20 Hz |
+
+Lecture :
+- La voie **DNg100 → moelle → MN de patte** est maintenant celle de la référence (10,8 Hz, 19–24 % des
+  396 MN, contre 1,4–2,5 Hz avec la moelle BANC, § 6) : le problème du § 6 est réglé par les données.
+- Un nouveau régime apparaît, **la boucle moelle → AN → cerveau → DN → moelle** : DNg100 seul recrute
+  17 % des DN à 11 Hz en moyenne, avec des types à 250–300 Hz (DNa03, DNa06, DNg33, DNb02, DNg75, DNa02 :
+  non physiologique), et 73 % des MN d'aile à 109 Hz (les MN des muscles de vol tirent à ~5 Hz en vol :
+  pathologique ; ils sont alimentés surtout par IN19B043/IN19B040/IN19B067 et vMS12 de la moelle, puis par
+  DNp31/DNut040). Couper AN → cerveau supprime la boucle (DN 0,2 Hz) ; couper cerveau → DN aussi (0,4 Hz),
+  en retrouvant exactement le régime du MANC seul.
+- Origine mesurée côté données (`scripts/dn_input_balance.py`, `results/dn_input_balance.csv`) : sur les
+  344 types de DN communs, l'export BANC récupère 0,68× les synapses **excitatrices** reçues par les DN
+  dans le FAFB v783 mais seulement 0,58× les **inhibitrices** ; E/I médian 1,43 (BANC) contre 1,17 (FAFB),
+  et pour les DN de la boucle : DNa03 1,70 vs 1,25, DNa06 1,03 vs 0,64, DNb02 1,37 vs 0,73, DNg33 4,86 vs
+  2,26. Le cerveau BANC est donc **biaisé vers l'excitation sur ses DN** par rapport à la référence ; ce
+  biais était masqué tant que la moelle BANC ne renvoyait presque rien par les AN.
+
+### 7.3 Résultats avec le corps et tous les capteurs (`scripts/body_brain_loop.py`, 500 ms)
+
+| Régime | spikes totaux/ms | MN de patte actifs (sur 330 reliés) | taux des actifs | activation musculaire moy. / max | hauteur thorax |
+|---|---|---|---|---|---|
+| repos (capteurs seuls) | 260 | 66 | 27 Hz | 0,024 / 0,72 | 0,80 mm |
+| DNg100 à 50 Hz | 301 | 79 | 27 Hz | 0,027 / 0,89 | 0,78 mm |
+| 43 types DN « marche » à 50 Hz | 291 | 71 | 37 Hz | 0,036 / 0,90 | 0,77 mm |
+
+Elle tient debout (aucune chute, hauteur stable), les MN toniques de posture tirent (extenseur du tibia,
+réducteur du fémur, rotateurs sternaux — cohérent avec Azevedo 2020), mais **repos et commande sont
+presque indiscernables** : le fond sensoriel suffit à amorcer la boucle du § 7.2, qui sature ce que la
+commande peut ajouter. Pas de déplacement (0,1 mm en 500 ms, dû à la pose initiale), pas d'alternance
+des six pattes : **la marche n'est pas validée**.
+
+### 7.4 Ce qui reste (dans l'ordre)
+
+1. **Boucle AN → cerveau → DN** : c'est maintenant le verrou. Sa source mesurée est un déficit
+   d'inhibition sur les DN du BANC (§ 7.2) ; à traiter sans gain global et sans toucher aux connexions —
+   options à évaluer : (a) FAFB v783 comme cerveau (complet, femelle, E/I de référence) avec le même
+   pont par type, (b) MN d'aile : le corps n'a pas d'ailes et leurs 66 MN ne pilotent rien, mais leur
+   embrasement recrute des AN ; (c) inhibition présynaptique des afférents (§ 6.6, point 3) qui alimentent
+   les AN.
+2. Classes de MN lents / intermédiaires / rapides et muscle (§ 6.6, points 2 et 4), une fois la boucle réglée.
+3. Les 66 MN de patte MANC sans nom de muscle : chercher leur muscle dans Lesser et al. 2024 (table S1)
+   plutôt que de les laisser muets.
