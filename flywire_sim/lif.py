@@ -29,6 +29,14 @@ class LIFParams:
     t_delay: float = 1.8       # ms
     w_syn: float = 0.275       # mV par synapse
     dt: float = 0.1            # ms
+    # Freins physiologiques optionnels (0 = désactivé) :
+    # adaptation de fréquence (courant hyperpolarisant ajouté à chaque spike, relaxe en tau_adapt)
+    adapt_b: float = 0.0       # mV par spike
+    tau_adapt: float = 100.0   # ms
+    # dépression synaptique à court terme (Tsodyks-Markram) : à chaque spike présynaptique une
+    # fraction U des ressources x est libérée (poids effectif ∝ U*x), x récupère en tau_rec
+    std_U: float = 0.0
+    tau_rec: float = 500.0     # ms
 
 
 @dataclass
@@ -81,6 +89,11 @@ class LIFNetwork:
 
         v = np.full(n, p.v_rest, dtype=np.float32)
         g = np.zeros(n, dtype=np.float32)
+        a = np.zeros(n, dtype=np.float32)          # adaptation (mV)
+        decay_a = np.float32(np.exp(-dt / p.tau_adapt))
+        x = np.ones(n, dtype=np.float32)           # ressources synaptiques par neurone présynaptique
+        rec = np.float32(dt / p.tau_rec)
+        use_std = p.std_U > 0
         refr = np.zeros(n, dtype=np.int32)
         # tampon circulaire : incréments de g à appliquer dans `delay_steps` pas
         ring = np.zeros((delay_steps, n), dtype=np.float32)
@@ -115,8 +128,12 @@ class LIFNetwork:
                         g[hit] += amp
 
             # 3) intégration exacte sur un pas : v relaxe vers v_rest + g
-            v += (p.v_rest + g - v) * gain
+            v += (p.v_rest + g - a - v) * gain
             g *= decay_s
+            if p.adapt_b:
+                a *= decay_a
+            if use_std:
+                x += (1.0 - x) * rec
 
             # 4) réfractaire : maintenu au reset
             in_refr = refr > 0
@@ -132,7 +149,14 @@ class LIFNetwork:
                 v[spiking] = p.v_reset
                 refr[spiking] = refr_steps
                 # propagation vers les cibles, appliquée après le délai
-                dg = self.W[:, spiking].sum(axis=1)
+                if p.adapt_b:
+                    a[spiking] += p.adapt_b
+                if use_std:
+                    eff = x[spiking].astype(np.float32)   # poids nominal quand x=1
+                    x[spiking] *= 1.0 - p.std_U
+                    dg = self.W[:, spiking] @ eff
+                else:
+                    dg = self.W[:, spiking].sum(axis=1)
                 ring[(step + delay_steps) % delay_steps] += np.asarray(dg).ravel() * p.w_syn
                 times.append(np.full(spiking.size, t, dtype=np.float32))
                 neurons.append(spiking.astype(np.int32))
