@@ -17,6 +17,7 @@ import pandas as pd
 from .. import banc, hybrid
 from ..lif import LIFNetwork, LIFParams, LIFStepper
 from ..network import Network
+from ..size import relative_size
 from .environment import Environment
 from .model import LEGS, build_mjcf
 from .muscles import Muscles, build_motor_map
@@ -61,7 +62,8 @@ class BodyBrainSim:
         W = banc.clamp_afferents(self.net.W, self.neurons)
         if eln_gain != 1.0:
             W = banc.synaptic_efficacy(W, self.neurons, self.net.sign, eln_gain)
-        self.lif = LIFNetwork(W, self.params, seed=seed, std_U=banc.depression_U(self.neurons, orn_std_u))
+        self.lif = LIFNetwork(W, self.params, seed=seed, std_U=banc.depression_U(self.neurons, orn_std_u),
+                              size=relative_size(self.neurons))
         self.stepper: LIFStepper = self.lif.stepper()
         self.model = mujoco.MjModel.from_xml_string(build_mjcf(extra_xml=extra_xml))
         assert abs(self.model.opt.timestep * 1000 - self.params.dt) < 1e-9

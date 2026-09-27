@@ -147,4 +147,8 @@ s'auto-entretient (§ 7 : déficit d'inhibition sur les DN dans l'export BANC). 
 (§ 8) cette boucle disparaît (DN 2 Hz au lieu de 11, MN d'aile 15 Hz au lieu de 108 avec le corps) et
 repos / DNg100 / « marche » redeviennent distinguables sur les MN de patte (2,7 / 3,7 / 10,7 Hz) — mais les
 six pattes restent en appui (aucune alternance, déplacement 0,1 mm) : **elle ne marche pas encore**
-(`scripts/body_brain_loop.py`, `scripts/banc_walk_analysis.py`).
+(`scripts/body_brain_loop.py`, `scripts/banc_walk_analysis.py`). L'enquête du chantier moteur (§ 9) montre que cette « référence » de 11 Hz était un état auto-entretenu de
+la moelle (400 interneurones saturés à > 100 Hz, activité qui monte après l'arrêt de DNg100) : avec les **volumes
+officiels** des neurones (`flywire_sim/size.py`, loi 1/volume, Kazama & Wilson 2008) l'attracteur disparaît en
+moelle isolée mais revient dès que les afférents de patte tirent, car le LIF à courant n'a aucun mécanisme
+limitant la fréquence — c'est le prochain verrou, avant les classes de MN et la dynamique musculaire.
