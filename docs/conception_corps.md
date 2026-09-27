@@ -170,10 +170,14 @@ de sucre, d'obstacles) sera une couche au-dessus, moteur de jeu à choisir quand
   totale = poids, hauteur du thorax ≈ 0,8 mm.
 - Tripode scripté sur les muscles nommés BANC (boucle ouverte) : avance de 5 mm en 2 s (2,5 mm/s ;
   réel 10–30 mm/s) sans basculer → les signes/couples des muscles sont plausibles, à affiner.
-- Boucle fermée BANC ↔ corps (200 ms, 43 DN « marche » à 20 Hz, w=0,21, adaptation 3 mV) : les
+- Boucle fermée BANC ↔ corps, v0 (200 ms, 43 DN « marche » à 20 Hz, w=0,21, adaptation 3 mV) : les
   391 MN de patte sont tous reliés à un actionneur, 364 tirent (~180 Hz) → co-contraction
   généralisée (activation moyenne 0,54) : la mouche se raidit et se dresse, ne marche pas encore.
-  Cause : dynamique VNC non calibrée (§7), pas le corps. Tests : `tests/test_body.py`.
+  Cause identifiée depuis : NT vérifiés en minuscules non reconnus (23 % → 43 % de synapses
+  inhibitrices) et afférents sensoriels excitables par le centre → voir `docs/calibration.md`.
+- Boucle fermée calibrée (1 s, DNg100 à 50 Hz, `banc.CALIBRATED`) : 129/391 MN actifs à 14 Hz,
+  activation musculaire moyenne 0,025, elle tient debout, ne marche pas encore (rythme à obtenir).
+  Tests : `tests/test_body.py`, `tests/test_banc_signs.py`.
 
 ## 8. Plan
 

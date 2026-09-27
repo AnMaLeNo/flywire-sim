@@ -46,9 +46,9 @@ class Trace:
 class BodyBrainSim:
     def __init__(self, params: LIFParams | None = None, seed: int = 0, sugar: float = 0.0):
         self.net, self.neurons = load_banc()
-        self.params = params or LIFParams(w_syn=0.21, adapt_b=3.0)
+        self.params = params or banc.CALIBRATED
         assert abs(self.params.dt - 0.1) < 1e-9, "dt cerveau = dt physique = 0.1 ms"
-        self.lif = LIFNetwork(self.net.W, self.params, seed=seed)
+        self.lif = LIFNetwork(banc.clamp_afferents(self.net.W, self.neurons), self.params, seed=seed)
         self.stepper: LIFStepper = self.lif.stepper()
         self.model = mujoco.MjModel.from_xml_string(build_mjcf())
         assert abs(self.model.opt.timestep * 1000 - self.params.dt) < 1e-9
