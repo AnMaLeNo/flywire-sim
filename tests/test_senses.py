@@ -91,3 +91,28 @@ def test_build_retinas_maps_shell_to_hemifield():
         lat = 1 if r.side == "l" else -1
         assert abs(np.median(lat * az) - 60.0) < 15.0       # axe optique à ~60° du côté de l'œil
         assert (lat * az > -45).mean() > 0.9               # champ presque entièrement ipsilatéral
+
+
+def test_tarsal_touch_and_taste_channels():
+    import numpy as np
+
+    from flywire_sim import banc
+    from flywire_sim.body.environment import Environment, TastePatch
+    from flywire_sim.body.senses import Channel
+    from flywire_sim.body.sim import BodyBrainSim
+
+    ch = Channel(neurons=np.arange(3), r_max=100.0, r_spont=5.0, tau_adapt_ms=100.0, adapt_frac=0.5)
+    ch.value = 1.0
+    r0 = ch.rate(0.1)
+    for _ in range(5000):
+        r = ch.rate(0.1)
+    assert r0 > 100.0 and 50.0 < r < r0          # adaptation soutenue vers r_spont + (1 - frac) r_max
+
+    env = Environment(taste_patches=[TastePatch(np.zeros(3), {"sugar": 1.0}, radius=5.0)])
+    sim = BodyBrainSim(params=banc.SENSES, env=env)
+    sim.run(30)
+    d = sim.data
+    touch = [sum(sim.senses._s(d, f"{ls.leg}_tarsus{k}_contact") for k in range(1, 6)) for ls in sim.senses.legs]
+    assert all(t > 0 for t in touch), touch          # les 6 tarses posés sont détectés par les soies tactiles
+    assert all(ls.channels["sugar"].value == 1.0 for ls in sim.senses.legs)
+    assert all(ls.channels["bitter"].value == 0.0 for ls in sim.senses.legs)

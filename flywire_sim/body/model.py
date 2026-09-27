@@ -109,7 +109,9 @@ def _leg_xml(leg, stiffness, damping):
             out.append(f'<site name="{leg}_claw" pos="0 0 {-seg_len:.4g}" size="0.03"/>')
             out.append(f'<geom class="adhesion" type="sphere" pos="0 0 {-seg_len:.4g}" size="0.03" mass="1e-8"/>')
         if seg.startswith("tarsus"):
-            out.append(f'<site name="{name}_touch" type="capsule" fromto="0 0 0 0 0 {-seg_len:.4g}" size="{r + 0.005}"/>')
+            # la zone tactile englobe la griffe (sphère d'adhésion) au bout du dernier tarsomère
+            tip = seg_len + (0.04 if seg == "tarsus5" else 0.0)
+            out.append(f'<site name="{name}_touch" type="capsule" fromto="0 0 0 0 0 {-tip:.4g}" size="{r + 0.02}"/>')
         parent = seg
     out.append("</body>" * len(LEG_CHAIN))
     return "\n".join(out)

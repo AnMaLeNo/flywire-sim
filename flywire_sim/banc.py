@@ -11,6 +11,7 @@ de toute façon des muscles, hors du réseau.
 import gzip
 import pickle
 import re
+from dataclasses import replace
 
 import numpy as np
 import pandas as pd
@@ -26,6 +27,11 @@ BANC = data.RAW / "banc888"
 # ~100/391 MN de patte à 10-35 Hz (médiane ~20 Hz, cf. MN lents ~30 Hz, Azevedo et al. 2020), le VNC
 # reste stable (~3000 neurones actifs, ~35 Hz) sans emballement du cerveau.
 CALIBRATED = LIFParams(w_syn=2.0, size_norm=0.5)
+# Régime provisoire pour les expériences sensorielles (docs/capteurs.md § 5) : avec l'activité spontanée
+# des afférents (ORN ~8 Hz, hygro/thermo toniques), CALIBRATED embrase lobe antennaire -> corps pédonculé ->
+# tout le cerveau ; la dépression synaptique (Kazama & Wilson 2008 : ORN->PN fortement dépressives) le
+# stabilise (PN ~26 Hz, KC ~11 Hz, DN ~1 Hz) au prix d'un recrutement DNg100 -> MN plus faible.
+SENSES = replace(CALIBRATED, std_U=0.2, tau_rec=500.0)
 
 
 def load_neurons() -> pd.DataFrame:

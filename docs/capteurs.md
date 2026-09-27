@@ -86,16 +86,49 @@ appliquée à la base de l'ariste (0,5 m/s → ~5°, Yorozu 2009) ; le son (`sou
 force sinusoïdale équivalente à ~1° d'oscillation. Gravité, vent, son et vibrations de la marche passent
 donc **tous par la physique** avant d'être lus par l'organe de Johnston.
 
-## 4. Résultats (300 ms, mouche posée, `scripts/experiments_senses.py`)
+## 4. Résultats (300 ms, mouche posée, régime `banc.SENSES`, `scripts/experiments_senses.py`)
 
-Voir `results/senses_*.txt` et la section 5 pour les limites de calibration mises en évidence.
+Fichiers : `results/senses_*_senses.txt`. Taux en Hz par neurone, moyennés sur la population et le côté.
+
+| Expérience | Témoin | Stimulus | Lecture |
+|---|---|---|---|
+| Posture | thorax à 0,79 mm, 6 tarses en contact (soies tactiles 30 Hz, charge lue par patte) ; antennes déviées de ~0,2° par la gravité | — | proprioception + contact fonctionnels |
+| Vision : boîte noire 3×3 mm à 3 mm à gauche | log-luminance Rh1 −0,55 / −0,54 (G/D) ; lamina 1,0 / 0,7 Hz | Rh1 gauche −0,95 (droite inchangée) ; lamina gauche 4,0 Hz, droite 0,7 ; R7/R8 gauche 80 → 77 Hz ; Tm gauche 0,1 → 0,3 Hz | réponse **OFF latéralisée** du bon côté ; T4/T5, LC muets (scène statique, régime dépressif) |
+| Olfaction : source « levure » à 1 mm à gauche | ORN 8 Hz | ORN levure 97 / 86 Hz (G/D, concentration 0,65 / 0,54), autres ORN 8 Hz ; PN +3 Hz ; KC +0,5 Hz | ORN spécifiques et latéralisés ; réponse centrale faible (§ 5) |
+| Goût : sol sucré | GRN 0 Hz | GRN sucre des tarses 76 / 78 Hz, GRN amers 0 ; DN +0,3 Hz | GRN sélectifs ; pas d'extension de trompe (MN9 muet) |
+| Vent 0,5 m/s venant de la gauche | JO C-F 2,9 / 2,7 Hz ; antennes −0,17 / +0,17° (lacet) | antennes déviées à −1,1 / −0,6° (lacet) et ±0,5° (tangage) ; JO C-F 7,6 / 7,2 Hz ; JO A/B inchangé | déviation statique lue par les cellules de position, pas par celles de vibration (Yorozu 2009) |
+| Chant 200 Hz | JO A/B 2,1 / 2,5 Hz | JO A/B 28,5 / 29,1 Hz, JO C-F 7 Hz (redressement de l'oscillation ±0,5°) | vibration lue par A/B (Kamikouchi 2009) |
+
+Les réponses centrales (PN, KC, DN) restent faibles : voir § 5.
 
 ## 5. Limites et suite
 
-- **Stabilité du lobe antennaire / corps pédonculé** : voir la section correspondante ci-dessous
-  (mise à jour avec les mesures).
-- La rétinotopie colonnaire et le chiasma externe restent des approximations (§ 2.3).
-- Les hygrorécepteurs sont toniques (pas de dérivée sèche/humide), les thermorécepteurs purement phasiques.
+### 5.1 L'activité spontanée des afférents embrase le lobe antennaire (constat de calibration)
+
+Avec `banc.CALIBRATED` (PR #2, réglé sur DNg100 → MN avec afférents silencieux), le simple bruit
+spontané physiologique des ORN (8 Hz × 3 000) — ou même les seuls hygro/thermorécepteurs toniques (90
+neurones) — suffit à embraser le lobe antennaire (LN 180 Hz, PN 150 Hz), le corps pédonculé (KC 155 Hz,
+au lieu de < 1 Hz) puis tout le cerveau (1,8 M spikes/s, DN 23 Hz, MN de patte 5 Hz). Balayage
+(`results/` et journal de session) : `size_norm=0.75` éteint le lobe (PN 3 Hz, KC 1 Hz) mais aussi la
+voie DNg100 → MN ; la dépression synaptique (`std_U=0.2, tau_rec=500`, Kazama & Wilson 2008) stabilise
+(PN 26 Hz, KC 11 Hz, DN 1 Hz, 20 MN toniques à 3 Hz) au prix d'un recrutement DNg100 plus faible
+(28/391 MN au lieu de 106). Aucun réglage **global** ne satisfait les deux : le lobe antennaire et le corps
+pédonculé reposent sur des mécanismes spécifiques absents du LIF homogène —
+
+- inhibition présynaptique GABA-B des terminaisons ORN par les LN (Olsen & Wilson 2008 ; Root 2008),
+  perdue par le clamp des afférents ;
+- forte dépression ORN → PN (Kazama & Wilson 2008) ;
+- seuil élevé des cellules de Kenyon et rétroaction APL (Lin 2014) → codage clairsemé.
+
+`banc.SENSES` (= CALIBRATED + dépression) est donc le régime **provisoire** des expériences sensorielles ;
+la prochaine passe de calibration doit introduire ces mécanismes (par type de synapse / de neurone, à
+partir des annotations officielles) puis re-régler DN → MN.
+
+### 5.2 Autres limites
+
+- Rétinotopie colonnaire et chiasma externe approximés (§ 2.2) ; L1-L5 modélisés en LIF (réels : gradués).
+- Le gain lamina (30 mV par unité log de contraste) est fixé pour qu'un contraste de ~25 % atteigne le seuil.
+- Déviation antennaire au vent ~1° à 0,5 m/s (ordre de grandeur de Yorozu 2009, non ajusté finement).
+- Hygrorécepteurs toniques (pas de dérivée), thermorécepteurs purement phasiques.
 - L'organe de Johnston A/B ne sépare pas encore les bandes de fréquence.
-- Le goût interne (pharynx) et la nociception (multidendritiques) sont silencieux.
-- Ocelles, DRA et vol : différés.
+- Goût interne (pharynx), nociception (multidendritiques), ocelles, DRA et vol : silencieux ou différés.

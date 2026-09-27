@@ -139,7 +139,7 @@ class Eyes:
     `period_ms` ; `currents()` et `spikes(dt_ms, rng)` fournissent l'entrée au réseau à chaque pas."""
 
     def __init__(self, model: mujoco.MjModel, retinas: list[Retina], period_ms: float = 5.0,
-                 size: int = 32, rho_deg: float = 4.5, r_max: float = 150.0, gain_mv: float = 12.0,
+                 size: int = 32, rho_deg: float = 4.5, r_max: float = 150.0, gain_mv: float = 30.0,
                  seed: int = 0):
         self.model, self.retinas, self.period_ms, self.size = model, retinas, period_ms, size
         self.r_max, self.gain_mv = r_max, gain_mv
@@ -248,16 +248,17 @@ class Eyes:
         """Potentiel R1-6 adapté (unités log : +1 = luminance x e)."""
         return self.p2 - self.adapt
 
-    def currents(self) -> list[tuple[np.ndarray, float]]:
-        """Entrées (indices, mV) pour les LMC : L1/L2 dépolarisés par l'assombrissement (contraste),
-        L3 par la luminance faible (soutenu)."""
+    def currents(self, scale: float = 1.0) -> list[tuple[np.ndarray, np.ndarray]]:
+        """Entrées (indices, mV par pas) pour les LMC : L1/L2 dépolarisés par l'assombrissement (contraste),
+        L3 par la luminance faible (soutenu). `scale` = dt/tau_syn du LIF pour que `gain_mv` soit la
+        dépolarisation stationnaire (la conductance intègre les entrées sur tau_syn)."""
         out = []
         contrast = np.clip(self.slow - self.p2, 0, None)           # >0 quand ça s'assombrit
         dark = np.clip(self.adapt - self.p2 + 0.3, 0, None)        # niveau soutenu sous la moyenne
         for mask, val in ((self.is_l12, contrast), (self.is_l3, dark * 0.5)):
-            if mask.any():
-                for i in np.flatnonzero(mask & (val > 0.02)):
-                    out.append((self.idx[i:i + 1], self.gain_mv * float(val[i])))
+            hit = np.flatnonzero(mask & (val > 0.02))
+            if hit.size:
+                out.append((self.idx[hit], (self.gain_mv * scale * val[hit]).astype(np.float32)))
         return out
 
     def rates(self) -> np.ndarray:

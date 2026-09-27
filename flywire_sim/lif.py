@@ -172,9 +172,10 @@ class LIFStepper:
         return self.step_count * self.p.dt
 
     def step(self, forced: np.ndarray | None = None,
-             currents: list[tuple[np.ndarray, float]] | None = None) -> np.ndarray:
+             currents: list[tuple[np.ndarray, float | np.ndarray]] | None = None) -> np.ndarray:
         """Avance d'un pas. `forced` : neurones forcés à tirer (entrée sensorielle) ; `currents` :
-        (indices, amplitude_mv) ajoutés à la conductance. Retourne les indices des neurones qui tirent."""
+        (indices, amplitude_mv scalaire ou par indice) ajoutés à la conductance. Retourne les indices
+        des neurones qui tirent."""
         p, v, g, a, x, refr = self.p, self.v, self.g, self.a, self.x, self.refr
         step = self.step_count
         slot = step % self.delay_steps
@@ -186,7 +187,7 @@ class LIFStepper:
         # 2) entrées externes
         if currents:
             for hit, amp in currents:
-                g[hit] += np.float32(amp)
+                g[hit] += np.asarray(amp, dtype=np.float32)
 
         # 3) intégration exacte sur un pas : v relaxe vers v_rest + g
         v += (p.v_rest + g - a - v) * self.gain

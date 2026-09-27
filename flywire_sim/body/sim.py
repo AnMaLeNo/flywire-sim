@@ -140,7 +140,7 @@ class BodyBrainSim:
                 if k % vis_every == 0:
                     self.eyes.update(d)
                 forced.append(self.eyes.spikes(dt, self.rng))
-                currents = self.eyes.currents()
+                currents = self.eyes.currents(dt / self.params.tau_syn)
             if stim_idx is not None and p_stim > 0:
                 forced.append(stim_idx[self.rng.random(stim_idx.size) < p_stim])
             forced = np.concatenate(forced)

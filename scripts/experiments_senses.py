@@ -13,7 +13,7 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from flywire_sim import data
+from flywire_sim import banc, data
 from flywire_sim.body.environment import (
     Environment,
     OdorSource,
@@ -42,8 +42,12 @@ def side_rates(sim: BodyBrainSim, ms: float, mask: np.ndarray) -> dict:
     return out
 
 
+PARAMS = {"calibrated": banc.CALIBRATED, "senses": banc.SENSES}
+CHOSEN = ["senses"]
+
+
 def run(env: Environment | None, ms: float, vision: bool = False, extra_xml: str = "", **kw) -> BodyBrainSim:
-    sim = BodyBrainSim(env=env, vision=vision, extra_xml=extra_xml, **kw)
+    sim = BodyBrainSim(params=PARAMS[CHOSEN[0]], env=env, vision=vision, extra_xml=extra_xml, **kw)
     sim.run(ms, spike_log=True)
     return sim
 
@@ -123,7 +127,9 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("which", nargs="?", default="all")
     ap.add_argument("--ms", type=float, default=300.0)
+    ap.add_argument("--params", choices=sorted(PARAMS), default="senses")
     a = ap.parse_args()
+    CHOSEN[0] = a.params
     exps = {"posture": exp_posture, "vision": exp_vision, "odor": exp_odor, "taste": exp_taste, "wind": exp_wind}
     todo = exps if a.which == "all" else {a.which: exps[a.which]}
     data.RESULTS.mkdir(parents=True, exist_ok=True)
@@ -132,7 +138,7 @@ def main() -> None:
         fn(a.ms, out)
         txt = "\n".join(out)
         print(txt, flush=True)
-        (data.RESULTS / f"senses_{name}.txt").write_text(txt + "\n")
+        (data.RESULTS / f"senses_{name}_{a.params}.txt").write_text(txt + "\n")
 
 
 if __name__ == "__main__":
