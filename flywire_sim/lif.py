@@ -39,10 +39,9 @@ class LIFParams:
     # fraction U des ressources x est libérée (poids effectif ∝ U*x), x récupère en tau_rec
     std_U: float = 0.0
     tau_rec: float = 500.0     # ms
-    # normalisation par la taille du neurone (Pugliese et al. 2025 : seuil ∝ taille, gain ∝ 1/taille ;
-    # la taille est approximée par le nombre total de synapses d'entrée, cf. [74] dans leur article) :
-    # le poids effectif reçu par le neurone i est divisé par max(1, n_in_i / médiane)^size_norm
-    # (les gros neurones, à faible résistance d'entrée, reçoivent des PSP plus petits par synapse).
+    # principe de taille (Kazama & Wilson 2008 ; Pugliese et al. 2025) : le poids effectif reçu par le
+    # neurone i est divisé par size_i^size_norm, size_i = volume officiel / V_REF (flywire_sim.size) ;
+    # size_norm = 1 <=> PSP par synapse ~ 1/volume (uEPSP constant, courant ~ volume).
     size_norm: float = 0.0
 
 
@@ -75,10 +74,11 @@ class SimResult:
 
 class LIFNetwork:
     def __init__(self, W: sp.csc_matrix, params: LIFParams | None = None, seed: int = 0,
-                 std_U: np.ndarray | None = None):
+                 std_U: np.ndarray | None = None, size: np.ndarray | None = None):
         # W[post, pre] en synapses signées ; on la garde en CSC pour extraire vite les colonnes des
         # neurones qui ont tiré (W[:, spiking] @ 1). `std_U` : fraction de ressources libérée par spike,
         # par neurone présynaptique (remplace le scalaire params.std_U ; 0 = pas de dépression).
+        # `size` : taille relative par neurone postsynaptique (volume / V_REF), requise si size_norm > 0.
         self.p = params or LIFParams()
         self.n = W.shape[0]
         self.std_U = (np.full(self.n, self.p.std_U, dtype=np.float32) if std_U is None
@@ -86,10 +86,11 @@ class LIFNetwork:
         assert self.std_U.shape == (self.n,)
         W = W.tocsc().astype(np.float32)
         if self.p.size_norm > 0:
-            n_in = np.asarray(abs(W).sum(axis=1)).ravel()
-            size = np.maximum(1.0, n_in / np.median(n_in[n_in > 0]))
-            scale = size ** -self.p.size_norm
-            W = sp.diags(scale.astype(np.float32)) @ W
+            if size is None:
+                raise ValueError("size_norm > 0 exige la taille relative par neurone (flywire_sim.size)")
+            size = np.asarray(size, dtype=np.float64)
+            assert size.shape == (self.n,) and (size > 0).all()
+            W = sp.diags((size ** -self.p.size_norm).astype(np.float32)) @ W
         self.W = W.tocsc()
         self.rng = np.random.default_rng(seed)
 

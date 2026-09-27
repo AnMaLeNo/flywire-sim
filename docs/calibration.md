@@ -538,3 +538,153 @@ Lecture :
    (Stürner 2025 en publie une partie) permettrait d'étendre le pont sans inventer ; à défaut, mesurer l'effet
    des AN non appariés en coupant les AN pontés (contrôle).
 3. Les 66 MN de patte MANC sans nom de muscle (§ 7.4, point 3) ; les `R1-6` et ocelles du FAFB non branchés.
+
+## 9. Chantier moteur : principe de taille (volumes officiels) et localisation de l'absence de rythme
+
+Question du § 8.5 : pourquoi aucune alternance ? Méthode inchangée : éliminer d'abord ce qui est à nous
+(capteurs, corps, conversion), puis isoler la moelle, puis le motif CPG, avec et sans afférents, sur des durées
+> 500 ms et en distinguant l'activité **pendant** la commande de celle **après son arrêt**. Aucune connexion,
+aucun neurone, aucune correspondance FAFB ↔ MANC n'est modifié dans ce chapitre.
+
+### 9.1 Ce qui est vérifié comme non responsable (côté corps)
+
+- **LIF** (`flywire_sim/lif.py`) : les équations reproduisent Shiu et al. 2024 (LIF, synapse alpha τ_syn 5 ms,
+  V_rest = V_reset = −52 mV, seuil −45 mV, τ_m 20 ms, réfractaire 2,2 ms, délai 1,8 ms). Mesure de contrôle
+  sur une chaîne de deux neurones : PSP unitaire ≈ 0,159 mV × `w_syn` × n_synapses (linéaire), soit ≈ 0,044 mV
+  par synapse à `w_syn` = 0,275. **Ce chiffre caractérise notre implémentation, pas une mesure biologique.**
+- **Capteurs au repos, mouche posée** (`scripts/senses_rest_rates.py`, 600 ms) : 38 700 spikes afférents/s au total.
+  Les plus gros contributeurs : campaniformes 150 neurones à 45 Hz (6 750 spk/s), soies tarsales 2 197
+  neurones dont 28 % au contact à ≈ 10 Hz (5 950), soies de l'abdomen 749 à 2,8 Hz (2 130), ORN 8 Hz spontanés
+  (physiologique, § 5.1). Griffe (claw) 2–9 Hz, hook 5–7 Hz, club 1,7 Hz, plaques pilifères 3–7 Hz : ordres de
+  grandeur des propriocepteurs au repos (Mamiya 2018). **Incertitude notée, non corrigée** : les campaniformes
+  ne s'adaptent pas dans notre modèle alors que leurs décharges toniques s'adaptent nettement à une force
+  soutenue (Ridgel et al. 2000, blatte ; Szczecinski et al. 2021, modèle adaptatif) — mais des unités purement
+  toniques existent aussi (Zill 1986, phasme), donc la fraction adaptée n'est pas connue ; on ne règle pas.
+- **Conversion MN → muscle, mapping, masses, couples** : audités § 6.1, inchangés (330 MN de patte reliés,
+  66 sans nom de muscle exploitable, jamais inventés).
+
+### 9.2 Principe de taille : données officielles au lieu du proxy « nombre d'entrées »
+
+La normalisation « par la taille » des PR #2–#7 (`size_norm`) utilisait le **nombre d'entrées pondérées**
+comme substitut de la taille (§ 3) et était éteinte dans CALIBRATED_V2. Les deux exports fournissent la
+morphologie officielle : FAFB `cell_stats.csv.gz` (`size_nm` = volume du maillage, `area_nm`, `length_nm`),
+MANC `Volume (nm^3)` (les colonnes surface / longueur du MANC sont vides dans l'export utilisé : refusées).
+
+Nouveau module `flywire_sim/size.py` (`relative_size(neurons)` = volume / `V_REF_NM3`) :
+- FAFB seul : `size_nm` ; MANC seul : `Volume (nm^3)` ; hybride : volume de la source, **somme des deux
+  moitiés** pour un neurone fusionné (DN, AN) ;
+- **`V_REF_NM3` = 2,5 × 10¹¹ nm³** ≈ volume médian des neurones MANC (2,46 × 10¹¹). C'est une **référence de
+  normalisation** (le neurone auquel s'applique `w_syn`), pas une constante biologique ;
+- neurones **tronqués** par le volume imagé (afférents, ascendants FAFB non fusionnés, descendants MANC non
+  fusionnés) : le vrai volume est plus grand d'un facteur inconnu → taille relative bornée à ≥ 1 (jamais
+  amplifiés) ; sans volume (9 neurones FAFB) → 1 ;
+- `LIFNetwork(..., size=)` exige maintenant cette taille dès que `size_norm` > 0 (plus de proxy silencieux) ;
+  `W[post, :]` est divisé par `size[post]^size_norm` (tests `tests/test_size.py`).
+
+Pourquoi la loi 1/volume est défendable : Kazama & Wilson 2008 (*Neuron*, ORN → PN, lobe antennaire) mesurent
+des uEPSP **uniformes** entre glomérules (6,19 ± 0,45 mV) alors que les courants unitaires croissent avec le
+volume de l'arbre : la conductance synaptique compense la résistance d'entrée plus basse des grands neurones.
+Dans nos données, surface et volume FAFB sont liés par log(area) = 0,93 log(size) − 2,45 (R² 0,93) : le volume
+est un bon proxy de la surface, donc de la conductance de fuite. Contrôle sur les six glomérules de Kazama
+(volumes FAFB des PN, comptes de synapses ORN → PN du FAFB) : uEPSP prédit **homogène** (γ = 0) de 0,26 à
+2,46 mV (× 10 d'écart, contraire à la mesure) ; avec **γ = 1** de 0,28 à 0,65 mV (× 2,3, l'uniformité observée).
+Le niveau absolu (× 10 sous la mesure) n'est pas un critère : la synapse ORN → PN est connue pour être
+exceptionnellement forte (nombreux sites de libération, Kazama 2008), donc non représentative du poids moyen
+par synapse EM.
+
+Distribution des tailles relatives : IN VNC 0,47 / 0,81 / **1,16** / 1,93 / 5,66 (quantiles 5–95 %) ; MN de
+patte 0,56 / 1,57 / **2,38** / 3,66 / 5,82 ; DNg100 fusionnés ≈ 22 ; médiane FAFB 0,31 (cerveau central
+0,65, lobe optique plus petit). Sous γ = 1 les MN de patte reçoivent donc ~2,4 × moins par synapse que le
+neurone de référence et les petits interneurones plus.
+
+### 9.3 Localisation : la « référence » DNg100 → MN du § 7–8 était un attracteur saturé
+
+MANC seule, DNg100 (2 neurones) à 50 Hz de 0 à 1 000 ms, 1 500 ms au total (`scripts/manc_rhythm.py
+--stim-stop 1000`) :
+
+| régime | total pendant | IN > 100 Hz (part des spikes IN) | MN patte | E1 IN17A001 (6 instances) | E2 INXXX466 | I1 IN16B036 | après l'arrêt |
+|---|---|---|---|---|---|---|---|
+| **γ = 0, w 0,275 (CALIBRATED_V2)** | 129 000 spk/s | **400 (72 %)** | 12,8 Hz (19 %) | 0–11 Hz | 0–9 Hz | **185 / 3 / 0 / 1 / 0 / 168 Hz** | **145 000 spk/s (↑)** |
+| γ = 1, w 0,75 | 3 400 | 0 | 0,3 Hz (7 %) | ≈ 6 Hz | ≈ 8 Hz | ≈ 6 Hz | 0 |
+| **γ = 1, w 0,9** | 8 300 | **0** | 1,1 Hz (20 %) | 4–8 Hz | 7–12 Hz | 4–12 Hz | 615 spk/s (↓) |
+| γ = 1, w 1,0 | 451 000 | 1 168 | 31,7 Hz (46 %) | 13 Hz | 10 Hz | 88 Hz | 680 000 (↑) |
+
+Lecture :
+1. Le régime de référence des § 7.2 / 8.3 (MN de patte 10,8 Hz sous DNg100) **n'était pas une propagation
+   physiologique** : 72 % des spikes des interneurones viennent de 400 neurones saturés à > 100 Hz (deux
+   instances de I1 à 185 et 168 Hz, deux IN19B012 à 145 / 136 Hz, les quatre autres instances muettes), et
+   l'activité **augmente** après l'arrêt de DNg100. C'est un état auto-entretenu de la moelle, atteint via
+   quelques gros neurones dont les nombreuses entrées sont sommées linéairement sans plafond.
+2. Avec les volumes officiels (γ = 1, w 0,9) cet attracteur disparaît en moelle isolée : aucun IN > 100 Hz,
+   les six instances de E1 / E2 / I1 sont **toutes** actives à 4–12 Hz (homogènes, comme attendu pour des
+   copies sérielles), l'activité **s'éteint** après l'arrêt. Mais les MN ne sont recrutés qu'à 1,1 Hz sur 20 %
+   (2,4 × moins par synapse) et aucun rythme net n'apparaît (rythmicité 0,15–0,4, périodes 110–240 ms,
+   soit 4–9 Hz, sous les 7–15 Hz attendus ; Pugliese 2025 obtient l'oscillation avec un modèle de taux).
+3. La marge est étroite : w 0,75 ne propage presque rien, w 1,0 explose (1 168 IN saturés, I1 88 Hz, activité
+   ↑ après l'arrêt). Le réseau linéaire est **au bord de l'attracteur** dès que la commande atteint les MN.
+
+Réseau hybride FAFB + MANC seul (sans capteurs), γ = 1, w 0,9 (`scripts/hybrid_decay.py`) : repos strictement
+silencieux ; DNg100 → IN VNC 0,5 Hz (8 %), MN patte 1,0 Hz (15 %), cerveau 0 ; après l'arrêt 785 spk/s (↓).
+Identique à la moelle isolée : le cerveau FAFB n'ajoute ni boucle ni fuite.
+
+### 9.4 Avec le corps et les capteurs : les afférents de patte relancent l'attracteur
+
+Corps + tous les capteurs, mouche posée, **au repos** (`scripts/body_brain_loop.py --brain fafb --no-stim`) :
+
+| régime | spk/ms | IN VNC (Hz, % actifs, n > 100 Hz) | MN patte | MN aile | DN | cerveau |
+|---|---|---|---|---|---|---|
+| γ = 0, w 0,275 (§ 8.4) | 143 | 3,0 Hz, 18 %, **71** | 2,6 Hz | 15 Hz | 2,3 Hz | 0,5 Hz |
+| γ = 1, w 0,75 | 284 | 15,3 Hz, 38 % | 20 Hz (44 %) | 26 Hz | 0,7 Hz | 0,1 Hz |
+| γ = 1, w 0,9 | 448 | **21,8 Hz, 44 %, 1 001** | 28 Hz (44 %) | 47 Hz | 2,6 Hz | 0,6 Hz |
+
+Ablation par canal (`scripts/ablate_senses.py`, 600 ms, γ = 1, w 0,9 ; `Senses.enabled`) : **propriocepteurs
+de patte seuls** (claw / hook / club / campaniformes / plaques pilifères) → 646 IN > 100 Hz, MN aile 25 Hz ;
+**soies tarsales seules** → 832 IN saturés, MN aile 37 Hz ; **goût des pattes** → 0 ; **tête + corps** (ORN,
+JO, thermo/hygro, soies, labellum) → IN VNC 0,6 Hz, MN aile 0, cerveau 0,6 Hz ; aucun capteur → 0. Le même
+test à γ = 0 donne 41 / 166 / 0 / 60 IN saturés : l'attracteur existe déjà au régime de référence, en plus
+petit (71 neurones au repos, surtout 19A GABA du tectulum alaire), et les afférents mécaniques de patte
+suffisent à l'allumer.
+
+Anatomie de l'attracteur (γ = 1, w 0,9, repos, 1 001 IN à 178 Hz médian) : neuropiles des pattes surtout T3
+(337), T2 (170), T1 (127), tectulum alaire (122), ANM (114) ; hémilignées 03A, 08A, 19A, 13A, 04B, 16B, 17A… ;
+GABA 397 / ACh 372 / Glu 232 (**l'inhibition sature aussi**) ; entrées : 65 % d'autres IN VNC, 15 % d'IN
+saturés eux-mêmes, 8 % DN, 7 % AN, **5 % afférents** ; E/I des synapses reçues 1,54. Sorties massives vers les
+MN de l'abdomen, des ailes et des pattes arrière. Ce n'est donc **pas un circuit précis** (pas un CPG de vol
+allumé par erreur) mais une population récurrente excitatrice-dominante qui, une fois au-dessus du seuil,
+monte au plafond réfractaire (1/2,2 ms) parce que le LIF à courant somme ses entrées linéairement et sans
+mécanisme limitant la fréquence.
+
+### 9.5 Mécanismes limitants testés (diagnostic, pas un réglage retenu)
+
+Corps + capteurs, γ = 1, w 0,9, 600 ms (`scripts/rate_limiting_mechanisms.py`) :
+
+| mécanisme | repos : IN VNC, n > 100 Hz, MN patte, MN aile | DNg100 50 Hz : MN patte |
+|---|---|---|
+| aucun | 21,0 Hz, 1 001, 26,9 Hz, 45 Hz | 27,0 Hz |
+| adaptation de fréquence 1 mV/spike, τ 100 ms | 10,9 Hz, 306, 15,2 Hz, 13 Hz | 17,1 Hz |
+| dépression synaptique universelle U 0,2, τ_rec 500 ms | 1,8 Hz, **0**, 1,8 Hz, 4 Hz | **1,9 Hz (≈ repos)** |
+| les deux | 1,6 Hz, 0, 1,5 Hz, 5,5 Hz | 1,7 Hz |
+
+L'adaptation seule réduit l'attracteur sans l'éliminer ; la dépression l'élimine mais, avec ces paramètres
+génériques (Tsodyks-Markram ; efficacité stationnaire 1/(1 + U·r·τ_rec) ≈ 17 % pour un DN à 50 Hz), elle
+efface aussi la commande DNg100. Ces deux mécanismes sont biologiquement universels mais leurs valeurs dans la
+moelle de la drosophile ne sont pas mesurées : **rien n'est adopté**. CALIBRATED_V2 reste inchangé.
+
+### 9.6 Décision et ce qui reste (dans l'ordre)
+
+Ce chapitre livre le diagnostic, l'outillage (`size.py`, `LIFNetwork(size=)`, `manc_rhythm.py --stim-stop`,
+`body_brain_loop.py --gamma`) et les tests, **sans changer le régime par défaut** : adopter γ = 1 sans
+mécanisme limitant produit l'attracteur dès que les pattes touchent le sol, et le régime actuel est lui-même
+un attracteur plus petit. La source de l'absence de rythme est maintenant située : **le modèle de neurone
+(sommation linéaire sans plafond) et l'absence de dynamique musculaire / de classes de MN**, pas le corps,
+pas les capteurs, pas le pont FAFB ↔ MANC.
+
+1. **Non-linéarité limitante justifiée** : chercher les mesures primaires chez la drosophile (adaptation de
+   fréquence des neurones centraux et des MN — Azevedo 2020 pour les MN lents/rapides ; dépression à des
+   synapses centrales identifiées — Kazama 2008 ORN → PN ; saturation conductance/potentiel d'inversion,
+   E_ACh ≈ 0 mV, E_GABA-A ≈ −70 mV) et n'adopter que ce qui est mesuré ou borné.
+2. Sous ce régime stabilisé, refaire § 9.3–9.4 : DNg100 → MN avec retour proprioceptif (les MN lents tirent à
+   ~30 Hz en posture sous retour sensoriel, Azevedo 2020), rythmicité E1/E2/I1, alternance.
+3. Classes de MN (lent / intermédiaire / rapide ; Azevedo 2020, Lesser 2024 pour le MANC) et dynamique du
+   muscle (twitch / tétanos / fusion) : la conversion `per_spike` / `tau_ms` actuelle est homogène (§ 6.1).
+4. Campaniformes : adaptation tonique (Ridgel 2000, Szczecinski 2021) si une fraction adaptée est documentée.
