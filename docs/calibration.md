@@ -393,9 +393,148 @@ des six pattes : **la marche n'est pas validée**.
 1. **Boucle AN → cerveau → DN** : c'est maintenant le verrou. Sa source mesurée est un déficit
    d'inhibition sur les DN du BANC (§ 7.2) ; à traiter sans gain global et sans toucher aux connexions —
    options à évaluer : (a) FAFB v783 comme cerveau (complet, femelle, E/I de référence) avec le même
-   pont par type, (b) MN d'aile : le corps n'a pas d'ailes et leurs 66 MN ne pilotent rien, mais leur
+   pont par type — **fait, § 8 : la boucle disparaît**, (b) MN d'aile : le corps n'a pas d'ailes et leurs 66 MN ne pilotent rien, mais leur
    embrasement recrute des AN ; (c) inhibition présynaptique des afférents (§ 6.6, point 3) qui alimentent
    les AN.
 2. Classes de MN lents / intermédiaires / rapides et muscle (§ 6.6, points 2 et 4), une fois la boucle réglée.
 3. Les 66 MN de patte MANC sans nom de muscle : chercher leur muscle dans Lesser et al. 2024 (table S1)
    plutôt que de les laisser muets.
+
+## 8. Cerveau FAFB v783 sous la moelle MANC (`flywire_sim/fafb.py`, `hybrid.load(brain="fafb")`)
+
+Décision prise après § 7.4 : le cerveau simulé n'est plus l'export BANC (DN sous-inhibés) mais le **FAFB
+v783** (FlyWire, Dorkenwald et al. 2024, annotations Schlegel et al. 2024 ; export officiel Codex
+`data/raw/codex783/`, femelle adulte, cerveau complet, 139 255 neurones), celui de l'étape 1. La moelle reste
+le **MANC v1.2.1** et les règles de § 7.1 sont inchangées (`hybrid.build(brain=...)`, `BRAINS = {"banc",
+"fafb"}` ; le BANC reste disponible pour comparaison). Toujours un **hybride de deux animaux** (femelle FAFB,
+mâle MANC) : pas le connectome d'une seule mouche.
+
+### 8.1 Pont FAFB ↔ MANC : nomenclatures et pierre de Rosette
+
+Le FAFB n'a pas de moelle et sa nomenclature n'est commune au MANC que pour les DN (DNg100, DNa02… ; 196
+types communs, 500 DN du FAFB). Les **AN** (`AN_GNG_165`, `AN_multi_54`…) et les **afférents ascendants**
+(`SA_VTV_3`…) portent des noms propres au FAFB (3 types d'AN et 0 type de SA communs au MANC) : le pont
+direct par type est impossible pour eux. Le **BANC** porte les deux nomenclatures sur les mêmes neurones
+(`cell_type` MANC-compatible ; `Alternative Cell Type(s)` et `Community labels` contenant les noms FAFB) et
+sert de **pierre de Rosette** (`fafb.bridge_types`) :
+
+- type FAFB → type MANC = type BANC **majoritaire** parmi les neurones BANC pontables (DN/AN/SA) portant ce nom
+  FAFB, retenu seulement si la majorité est stricte (part > 0,5 ; `BRIDGE_PURITY`). Les égalités 1/2 (51
+  types) ne sont pas pontées. Les types déjà identiques sont conservés tels quels ;
+- **669 types FAFB pontés** ; la fusion se fait ensuite par **(super_class, `bridge_type`, side)**, k =
+  min(n_FAFB, n_MANC) paires, comme en § 7.1 ;
+- c'est une **table de correspondance annotée**, pas une fusion fonctionnelle : aucun type n'est apparié par
+  position, région d'entrée ou rôle supposé, et aucun neurone sans type pontable n'est fusionné.
+
+| | fusions | dont pont direct (même nom) | dont via BANC | FAFB non appariés (gardent leurs connexions cérébrales, pas de moelle) | MANC non appariés (moelle seule, aucune connexion cérébrale) |
+|---|---|---|---|---|---|
+| DN | **919** | 475 | 444 | 386 / 1 305 | 409 / 1 328 |
+| AN | **592** | 6 | 586 | 1 158 / 1 750 | 1 270 / 1 862 |
+| sensoriels ascendants | **59** | 0 | 59 | 553 / 612 | 476 / 535 |
+| total | **1 570** (774 gauche / 796 droite) | 481 | 1 089 | 2 097 | 2 155 (+ 8 efférents) |
+
+Réseau : **161 350 noeuds, 4 072 513 entrées** ; sources `fafb` 137 685, `manc` 22 095, `fused` 1 570.
+Le recouvrement des AN (592 / 1 750 FAFB, 34 %) et des afférents ascendants (59 / 612, 10 %) est
+**faible** : les deux tiers du retour moelle → cerveau du FAFB et 90 % de ses afférents ascendants ne
+reçoivent rien de la moelle MANC. C'est une limite des annotations disponibles, assumée plutôt que comblée
+par des correspondances inventées ; elle sous-estime le retour ascendant vers le cerveau (§ 8.4).
+
+Autres règles :
+- **Aucun neurone FAFB retiré** (le FAFB n'a pas de moelle) ; **aucune synapse ajoutée** :
+  `tests/test_hybrid_fafb.py` tire 4 000 entrées de W et vérifie que chacune est une paire (pré, post) de
+  l'export FAFB ou de l'export MANC.
+- **Signes** : chaque connexion garde le signe du NT prédit de son export (FAFB pour le cerveau, MANC pour la
+  moelle) ; les 110 MN de la tête du FAFB sont forcés excitateurs comme les MN du MANC (glutamate excitateur
+  à la jonction neuromusculaire). **228 / 1 570 fusionnés** ont un signe différent dans les deux jeux (476 un
+  NT prédit différent) — conservés tels quels, pas d'arbitrage.
+- **Gauche / droite** : `side` officiel des deux jeux (côté du soma, point de vue de l'animal) ; les fusions
+  respectent le côté (test). Volume FAFB : X croît vers la **droite** de la mouche, Y vers le ventre, Z vers
+  l'arrière (vérifié sur les centroïdes annotés : rétine gauche X ≈ 220 µm / droite ≈ 820 ; ocelles Y ≈ 90 /
+  labellum ≈ 350 ; ORN Z ≈ 30 / calyx ≈ 170), soit un **miroir en x** par rapport au volume BANC utilisé par
+  `body/vision.py` : `fafb.load_positions` renvoie (x, y, z)_BANC = (−X, Z, −Y)_FAFB en µm (l'export Codex
+  `coordinates` est en nm). Les deux rétines se construisent (6 271 / 5 957 colonnes, axes optiques
+  symétriques à ±46° d'azimut, test `test_fafb_retinas_both_eyes`) ; l'œil gauche du BANC n'avait que
+  3 262 colonnes.
+
+### 8.2 Capteurs de la tête (FAFB) : annotations transférées et canaux vides
+
+Le FAFB annote ses 16 938 afférents par **classe** (`cell_class`), **sous-classe** et **type**, pas par
+organe / fonction / partie du corps comme le BANC (colonnes qu'attend `body/senses.py`). Transfert
+(`fafb.transfer_sensory`) :
+
+1. par **type cellulaire partagé** avec le BANC (ORN_DA1, JO-B, BM_InOm, R7… : annotation majoritaire du
+   type BANC) ;
+2. sinon par une **table explicite** de 12 (classe, sous-classe) FAFB → (cls, sub_class, body_part, function)
+   (`FAFB_SUB_CLASS` : `sugar/water`, `low-salt`, `bitter`, `cold`, `heating`, `ocellar`, `auditory`,
+   `wind_gravity`, `grooming`, `eye bristle`, `head bristle`, photorécepteurs) ;
+3. sinon la classe FAFB est gardée telle quelle (`cls`), sans sous-classe.
+
+Couverture : 16 854 / 16 938 avec `sub_class` (84 sans : 58 `R1-6` sans côté, 12 `mechanosensory` et 2
+`gustatory` sans type, 12 autres). Conséquences mesurées sur les canaux de `senses.py` (repos, FAFB vs BANC) :
+
+| canal | FAFB | BANC | pourquoi |
+|---|---|---|---|
+| ORN antenne + palpes | 1 904 | 2 603 | moins d'ORN typés dans le FAFB (2 281 ORN dont 243 `orn_unknown`) |
+| labellum sucre / eau | 133 / 129 | 87 / 17 | le FAFB ne sépare pas Gr64f et ppk28 : `sugar/water` → les **mêmes** neurones répondent au sucre et à l'eau (sur-approximation assumée, pas de partage inventé) |
+| labellum sel faible | 8 | 60 | annotation `low-salt` rare dans le FAFB |
+| labellum métaux lourds / cou (`neck`) | 0 / 0 | 39 / 9 | fonctions propres aux annotations BANC, absentes du FAFB |
+| JO A–F, thermo, hygro, soies, ocelles | ≈ idem | | types partagés |
+
+**Non branché** : les 8 399 `R1-6` (le modèle de vision pilote directement L1/L2 à partir de la luminance de la
+colonne, comme avant ; les R1-6 du connectome ne reçoivent rien) et les 273 cellules ocellaires (pas de rendu
+des ocelles).
+
+### 8.3 Résultats, réseau seul (`scripts/hybrid_regimes.py --brain fafb`, CALIBRATED_V2, 500 ms)
+
+| Réseau | total spk/s | DN | AN | IN VNC | MN patte | MN aile |
+|---|---|---|---|---|---|---|
+| MANC seul, DNg100 (2) à 50 Hz (§ 7.2) | 112 000 | 0,6 Hz | 3,3 Hz (8 %) | 6,6 Hz (14 %) | 10,8 Hz (19 %) | 23,7 Hz (48 %) |
+| FAFB + MANC, repos | 0 | 0 | 0 | 0 | 0 | 0 |
+| **FAFB + MANC, DNg100 à 50 Hz** | 110 000 | **0,6 Hz (2 %)** | 1,8 Hz (5 %) | 6,4 Hz (14 %) | **10,7 Hz (18 %)** | **23,1 Hz (44 %)** |
+| idem, AN → cerveau/DN coupé | 122 000 | 0,5 Hz | 2,3 Hz | 7,0 Hz | 10,9 Hz (19 %) | 28,3 Hz |
+| idem, cerveau/AN → DN coupé | 124 000 | 0,5 Hz | 2,3 Hz | 7,0 Hz | 10,9 Hz (19 %) | 28,1 Hz |
+| BANC + MANC, DNg100 (§ 7.2) | 237 000 | 11,3 Hz (17 %) | 7,9 Hz | 5,5 Hz | 7,8 Hz (24 %) | 109 Hz (73 %) |
+
+Lecture : avec le cerveau FAFB, DNg100 → moelle → MN de patte est **identique au MANC seul** (10,7 vs
+10,8 Hz, 18–19 %) et la **boucle moelle → AN → cerveau → DN du § 7.2 n'existe plus** (DN 0,6 Hz au lieu de
+11,3 ; MN d'aile 23 Hz au lieu de 109) : couper AN → cerveau ou cerveau → DN ne change presque rien. Le
+biais E/I des DN du BANC (§ 7.2) était bien la source de la boucle. Le cerveau reste à 0 Hz sous DNg100 seul
+(pas de retour ascendant excitateur qui s'auto-entretienne).
+
+### 8.4 Résultats avec le corps et tous les capteurs (`scripts/body_brain_loop.py --brain fafb`, 500 ms)
+
+| Régime | cerveau | spk/ms | DN | AN | IN VNC | MN patte (Hz, % actifs) | MN aile | MN reliés actifs / 330, taux | act. musc. moy./max | appui 6 pattes, levers | corr. G/D |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| repos (capteurs seuls) | **FAFB** | 143 | 2,3 Hz | 1,8 Hz | 2,9 Hz | **2,7 Hz (21 %)** | 15 Hz | 76, 13 Hz | 0,013 / 0,76 | 0,98–1,00 ; 0–2 | +1,0 |
+| DNg100 à 50 Hz | FAFB | 151 | 2,3 Hz | 2,1 Hz | 3,3 Hz | **3,7 Hz (21 %)** | 14 Hz | 75, 18 Hz | 0,018 / 0,86 | 0,98–1,00 ; 0–3 | +0,94 |
+| 43 types DN « marche » à 50 Hz | FAFB | 208 | 3,2 Hz | 3,0 Hz | 6,6 Hz | **10,7 Hz (21 %)** | 27 Hz | 72, 46 Hz | 0,039 / 1,00 | 0,98–1,00 ; 1–2 | +0,9 |
+| repos | BANC (§ 7.3) | 260 | 10,0 Hz | 9,0 Hz | 4,4 Hz | 4,9 Hz (19 %) | **105 Hz** | 66, 27 Hz | 0,024 / 0,72 | 0,98–1,00 ; 0–2 | +1,0 |
+| DNg100 | BANC | 301 | 11,5 Hz | 10,6 Hz | 5,8 Hz | 5,5 Hz (22 %) | 108 Hz | 79, 27 Hz | 0,027 / 0,89 | 0,98–1,00 ; 0–2 | +1,0 |
+| « marche » | BANC | 291 | 10,9 Hz | 10,7 Hz | 5,9 Hz | 7,2 Hz (19 %) | 113 Hz | 71, 37 Hz | 0,036 / 0,90 | 0,98–1,00 ; 0–2 | +0,9 |
+
+(appui = fraction du temps où le tarse touche le sol ; levers = transitions appui → levé par patte ;
+corr. G/D = corrélation d'appui des pattes gauche/droite d'une même paire, attendue **négative** en tripode.
+Hauteur du thorax 0,77–0,79 mm, déplacement 0,07–0,13 mm dans tous les cas = tassement de la pose initiale.)
+
+Lecture :
+- Le fond sensoriel ne relance plus le cerveau : DN 2,3 Hz et MN d'aile 15 Hz au repos (BANC : 10 et 105 Hz),
+  activité totale divisée par ~2 (143 vs 260 spk/ms). **Repos, DNg100 et « marche » sont maintenant
+  distinguables** sur les MN de patte (2,7 → 3,7 → 10,7 Hz ; BANC : 4,9 → 5,5 → 7,2).
+- Mais **elle ne marche pas** : les six pattes restent en appui 98–100 % du temps, 0–3 levers en 500 ms,
+  corrélation gauche/droite ≈ +1 (aucune alternance), aucun déplacement au-delà du tassement. Sous « marche »
+  l'activité MN se concentre sur une patte (patte arrière droite 45 Hz, les autres 1–10 Hz) : posture
+  tonique, pas de rythme. Les MN toniques (extenseur du tibia 33 Hz, fléchisseur du trochanter, rotateur
+  sternal) dominent, comme en § 7.3.
+- Le régime MN patte à 21 % actifs dès le repos vient des afférents de patte (propriocepteurs, campaniformes,
+  soies au contact) : c'est le réflexe postural attendu, pas une commande.
+
+### 8.5 Ce qui reste (dans l'ordre)
+
+1. **Rythme de marche** : la voie DN → moelle → MN est à la référence et la boucle parasite a disparu ;
+   l'absence d'alternance est maintenant à chercher dans la moelle et le muscle, pas dans le cerveau —
+   classes de MN lents / intermédiaires / rapides et dynamique du muscle (§ 6.6), afférents de patte
+   (inhibition présynaptique, gain des propriocepteurs pendant la marche), puis durée > 500 ms.
+2. **Recouvrement AN / afférents ascendants** (34 % / 10 %) : une table officielle FAFB ↔ MANC des AN
+   (Stürner 2025 en publie une partie) permettrait d'étendre le pont sans inventer ; à défaut, mesurer l'effet
+   des AN non appariés en coupant les AN pontés (contrôle).
+3. Les 66 MN de patte MANC sans nom de muscle (§ 7.4, point 3) ; les `R1-6` et ocelles du FAFB non branchés.

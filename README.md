@@ -99,13 +99,20 @@ biologiquement (à creuser : conventions gauche/droite de l'imagerie FAFB, qui e
 
 Conception détaillée dans `docs/conception_corps.md`. En résumé :
 
-- **Système nerveux** : réseau **hybride** (`flywire_sim/hybrid.py`, 156 735 neurones) = cerveau du
-  **BANC v888** (femelle, export officiel Codex, `flywire_sim/banc.py`) + ganglion ventral du **MANC v1.2.1**
-  (mâle, Janelia, export officiel Codex, `flywire_sim/manc.py`), reliés par 2 949 neurones descendants /
-  ascendants appariés par type cellulaire et côté ; aucune connexion inventée, chaque synapse vient d'un
-  des deux exports (`docs/calibration.md` § 7). Deux animaux différents : ce n'est pas le connectome
-  d'une seule mouche. Les motoneurones des pattes du MANC sont annotés muscle par muscle ; les
-  neurones sensoriels du MANC reçoivent leur organe par transfert des annotations BANC (même type).
+- **Système nerveux** : réseau **hybride** (`flywire_sim/hybrid.py`) = un cerveau + le ganglion ventral du
+  **MANC v1.2.1** (mâle, Janelia, export officiel Codex, `flywire_sim/manc.py`), reliés par des neurones
+  descendants / ascendants appariés par type cellulaire et côté ; aucune connexion inventée, chaque synapse
+  vient d'un des deux exports. Deux cerveaux au choix (`--brain`) :
+  - `fafb` (**défaut recommandé**, `flywire_sim/fafb.py`) : **FAFB v783** (femelle, cerveau complet, export
+    officiel Codex), 161 350 neurones, 1 570 fusions (`docs/calibration.md` § 8). Les types de DN portent la
+    nomenclature commune ; les AN et afférents ascendants du FAFB ont leurs propres noms, appariés au MANC
+    via les annotations du BANC qui portent les deux nomenclatures (`bridge_type`), jamais par fonction.
+  - `banc` : **BANC v888** (femelle, `flywire_sim/banc.py`) sans ses neurones de la moelle, 156 735 neurones,
+    2 949 fusions (§ 7) ; son export sous-estime l'inhibition reçue par les DN, d'où une boucle
+    moelle → cerveau → moelle qui a motivé le passage au FAFB.
+  Dans les deux cas : deux animaux différents, ce n'est pas le connectome d'une seule mouche. Les motoneurones
+  des pattes du MANC sont annotés muscle par muscle ; les neurones sensoriels du MANC (et, pour le FAFB, ceux
+  de la tête) reçoivent organe et fonction par transfert des annotations BANC (même type cellulaire).
 - **Corps MuJoCo** (`body/model.py`) : MJCF généré par nous (arbre cinématique, 82 DoF, muscles,
   adhésion tarsale, capteurs, collisions), **sans ailes** ; formes, masses et positions d'articulations
   issues d'un **scan micro-CT** d'une femelle adulte (maillages NeuroMechFly, Apache-2.0,
@@ -115,14 +122,16 @@ Conception détaillée dans `docs/conception_corps.md`. En résumé :
   produit une secousse (twitch).
 - **Sens** (`body/senses.py`) : angles, vitesses, charge et contacts des pattes → 3 650 neurones
   sensoriels de patte du MANC (hair plates, organes chordotonaux claw/hook/club, campaniformes,
-  soies tactiles, soies gustatives) en spikes Poisson ; les sens de la tête restent ceux du BANC.
+  soies tactiles, soies gustatives) en spikes Poisson ; les sens de la tête sont ceux du cerveau choisi
+  (`docs/capteurs.md` ; pour le FAFB, § 8.2 de `docs/calibration.md` liste les canaux vides).
 - **Boucle fermée** (`body/sim.py`) : capteurs → spikes → un pas de LIF → spikes MN → muscles →
   un pas de MuJoCo.
 
 ```bash
 PYTHONPATH=. .venv/bin/python scripts/body_stand_test.py        # debout sous gravité + images
 PYTHONPATH=. .venv/bin/python scripts/body_muscle_test.py --video   # tripode scripté (sans cerveau)
-PYTHONPATH=. .venv/bin/python scripts/body_brain_loop.py --duration 200 --video  # cerveau BANC + moelle MANC + corps
+PYTHONPATH=. .venv/bin/python scripts/body_brain_loop.py --brain fafb --duration 200 --video  # cerveau FAFB + moelle MANC + corps
+PYTHONPATH=. .venv/bin/python scripts/hybrid_regimes.py --brain fafb   # réseau seul : repos, DNg100, coupures
 PYTHONPATH=. .venv/bin/pytest tests
 ```
 
@@ -133,6 +142,9 @@ eLN → PN électriques atténuées, dépression ORN → PN) : avec tous les cap
 stable (fond ~0 Hz hors lobe antennaire, cellules de Kenyon muettes au repos) et les neurones descendants
 « marche » recrutaient les motoneurones de patte faiblement (1–3 Hz) avec la moelle BANC, sous-complète
 (`docs/calibration.md` § 6). Avec la moelle MANC, DNg100 → MN de patte atteint la référence (11 Hz,
-19–24 % des MN), mais une boucle moelle → ascendants → cerveau → descendants s'auto-entretient
-(§ 7 : déficit d'inhibition sur les DN dans l'export BANC). Elle ne marche pas encore (`scripts/banc_al_gain.py`,
-`scripts/banc_calibrate.py`, `scripts/banc_walk_analysis.py`).
+19–24 % des MN), mais sous le cerveau BANC une boucle moelle → ascendants → cerveau → descendants
+s'auto-entretient (§ 7 : déficit d'inhibition sur les DN dans l'export BANC). Avec le cerveau **FAFB v783**
+(§ 8) cette boucle disparaît (DN 2 Hz au lieu de 11, MN d'aile 15 Hz au lieu de 108 avec le corps) et
+repos / DNg100 / « marche » redeviennent distinguables sur les MN de patte (2,7 / 3,7 / 10,7 Hz) — mais les
+six pattes restent en appui (aucune alternance, déplacement 0,1 mm) : **elle ne marche pas encore**
+(`scripts/body_brain_loop.py`, `scripts/banc_walk_analysis.py`).
