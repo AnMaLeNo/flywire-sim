@@ -82,6 +82,7 @@ def main() -> None:
     ap.add_argument("--ms", type=float, default=500)
     ap.add_argument("--only", nargs="*", default=None)
     ap.add_argument("--top", type=int, default=0)
+    ap.add_argument("--brain", default="banc", choices=["banc", "fafb"])
     a = ap.parse_args()
     want = set(a.only) if a.only else {"manc", "hybrid", "cut_an", "cut_dn_in", "rest"}
 
@@ -91,7 +92,7 @@ def main() -> None:
         stim = np.flatnonzero(mn.cell_type.eq("DNg100").to_numpy())
         run(mnet.W, mn, stim, a.ms, f"manc DNg100 x{stim.size}", a.top)
 
-    net, n = hybrid.load()
+    net, n = hybrid.load(brain=a.brain)
     n = n.reset_index(drop=True)
     g = groups(n)
     stim = np.flatnonzero(n.cell_type.fillna("").eq("DNg100").to_numpy())

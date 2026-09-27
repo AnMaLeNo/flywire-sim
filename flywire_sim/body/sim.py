@@ -24,9 +24,9 @@ from .senses import Senses
 from .vision import Eyes, build_retinas
 
 
-def load_network(min_synapses: int = 5) -> tuple[Network, pd.DataFrame]:
-    """Réseau hybride (cerveau BANC + moelle MANC) et table des neurones alignée sur ses indices."""
-    net, n = hybrid.load(min_synapses)
+def load_network(min_synapses: int = 5, brain: str = "banc") -> tuple[Network, pd.DataFrame]:
+    """Réseau hybride (cerveau BANC ou FAFB + moelle MANC) et table des neurones alignée sur ses indices."""
+    net, n = hybrid.load(min_synapses, brain)
     for c in ("function", "body_part", "cell_type", "side", "super_class", "sub_class", "cls", "region", "bridge"):
         n[c] = n[c].fillna("")
     return net, n
@@ -40,6 +40,7 @@ class Trace:
     n_mn_spikes: list = field(default_factory=list)
     n_sens_spikes: list = field(default_factory=list)
     ctrl: list = field(default_factory=list)
+    contact: list = field(default_factory=list)   # par patte (ordre LEGS) : somme des capteurs tactiles du tarse
 
 
 # traînée de l'ariste : F = WIND_DRAG x (vent - vitesse) [µN par mm/s] ; 500 mm/s -> ~5° de déviation.
@@ -52,8 +53,9 @@ class BodyBrainSim:
     def __init__(self, params: LIFParams | None = None, seed: int = 0, sugar: float = 0.0,
                  env: Environment | None = None, vision: bool = False, vision_period_ms: float = 5.0,
                  vision_size: int = 32, extra_xml: str = "", orn_std_u: float = banc.ORN_STD_U,
-                 eln_gain: float = banc.ELN_ELECTRICAL_GAIN):
-        self.net, self.neurons = load_network()
+                 eln_gain: float = banc.ELN_ELECTRICAL_GAIN, brain: str = "banc"):
+        self.brain = brain
+        self.net, self.neurons = load_network(brain=brain)
         self.params = params or banc.CALIBRATED_V2
         assert abs(self.params.dt - 0.1) < 1e-9, "dt cerveau = dt physique = 0.1 ms"
         W = banc.clamp_afferents(self.net.W, self.neurons)
@@ -71,7 +73,7 @@ class BodyBrainSim:
         self.senses.sugar = sugar
         self.eyes: Eyes | None = None
         if vision:
-            retinas = build_retinas(self.neurons, banc.load_positions())
+            retinas = build_retinas(self.neurons, hybrid.BRAINS[brain].load_positions())
             self.eyes = Eyes(self.model, retinas, period_ms=vision_period_ms, size=vision_size, seed=seed)
         self.vision_period_ms = vision_period_ms
         self.head = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "c_head")
@@ -157,6 +159,8 @@ class BodyBrainSim:
                 tr.thorax_pos.append(d.qpos[:3].copy())
                 tr.n_spikes.append(acc[0]); tr.n_mn_spikes.append(acc[1]); tr.n_sens_spikes.append(acc[2])
                 tr.ctrl.append(d.ctrl.copy())
+                tr.contact.append([sum(d.sensordata[self.senses.sensor[f"{leg}_tarsus{k}_contact"]] for k in range(1, 6))
+                                   for leg in LEGS])
                 acc[:] = 0
             if render is not None and k % rend_every == 0:
                 render(m, d, st.t_ms)

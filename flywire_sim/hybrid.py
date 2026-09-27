@@ -1,4 +1,4 @@
-"""Réseau hybride : cerveau du BANC (femelle) + moelle du MANC (mâle), pont par type cellulaire.
+"""Réseau hybride : cerveau du BANC ou du FAFB (femelles) + moelle du MANC (mâle), pont par type cellulaire.
 
 Pourquoi : les entrées des interneurones de la moelle du BANC ne sont récupérées qu'à ~0,2x (docs/calibration.md
 § 6), ce qui éteint la voie DN -> prémoteurs -> MN ; le MANC est complet. On garde donc le BANC pour tout ce
@@ -14,19 +14,26 @@ entrées cérébrales (DN) ou des sorties cérébrales (AN) d'un frère de même
 BANC restent des neurones du cerveau sans prolongement dans la moelle. Aucune synapse n'est inventée : chaque
 entrée de W vient d'une paire (pré, post) officielle de l'un des deux exports.
 
+Cerveau FAFB v783 (brain="fafb", docs/calibration.md § 8) : mêmes règles ; le type de pont d'un neurone FAFB
+est `bridge_type` (fafb.bridge_types : nomenclature MANC via le BANC), et le FAFB n'ayant pas de moelle,
+aucun neurone n'en est retiré.
+
 Annotations des afférents : le MANC n'annote les afférents qu'au niveau de la classe (soie, campaniforme,
 chordotonal, plaque pilifère, soie gustative) ; le BANC les annote par organe (claw/hook/club, tarse...) et
 fonction gustative. Les deux jeux partagent les types (SNta29, SNpp50...) : on transfère au MANC, type par type,
 l'annotation majoritaire du BANC (pureté médiane 0,99).
 """
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import scipy.sparse as sp
 
-from . import banc, data, manc
+from . import banc, data, fafb, manc
 from .network import Network
+
+BRAINS = {"banc": banc, "fafb": fafb}
 
 BRIDGED = ("descending", "ascending", "sensory_ascending", "ascending_visceral_circulatory")
 VNC_REGIONS = {"T1_PRONM", "T2_MESONM", "T3_METANM", "ABDNM", "HTCT", "INTTCT", "WTCT", "AMNP", "NTCT", "LTCT",
@@ -35,9 +42,15 @@ VNC_BODY_PARTS = {"front_leg", "middle_leg", "hind_leg", "wing", "wing_margin", 
                   "abdomen", "abdominal_wall", "thorax", "prosternal_organ", "thoracic_abdominal", "uterus",
                   "reproductive_tract", "notum"}
 COLUMNS = ("root_id", "super_class", "cls", "sub_class", "function", "body_part", "side", "cell_type", "region",
-           "hemilineage", "nt_pred", "nt_verified", "flow", "nerve", "labels")
-NETWORK_FILE = data.PROCESSED / "network_hybrid_min5.npz"
-NEURONS_FILE = data.PROCESSED / "neurons_hybrid.csv.gz"
+           "hemilineage", "nt_pred", "nt_verified", "flow", "nerve", "labels", "bridge_type")
+
+
+def network_file(brain: str) -> Path:
+    return data.PROCESSED / ("network_hybrid_min5.npz" if brain == "banc" else f"network_hybrid_{brain}_min5.npz")
+
+
+def neurons_file(brain: str) -> Path:
+    return data.PROCESSED / ("neurons_hybrid.csv.gz" if brain == "banc" else f"neurons_hybrid_{brain}.csv.gz")
 
 
 def vnc_resident(b: pd.DataFrame) -> np.ndarray:
@@ -83,8 +96,10 @@ class Bridge:
 
 
 def bridge(b: pd.DataFrame, m: pd.DataFrame) -> Bridge:
+    """`b` : neurones du cerveau ; leur type de pont est `bridge_type` s'il existe, sinon `cell_type`."""
     fused, unpaired = [], []
-    bb = b[b.super_class.isin(BRIDGED) & b.cell_type.notna()]
+    btype = b.bridge_type if "bridge_type" in b.columns else b.cell_type
+    bb = b[b.super_class.isin(BRIDGED) & btype.notna()].assign(cell_type=btype)
     mm = m[m.super_class.isin(BRIDGED)]
     groups_b = {k: v.index.to_numpy() for k, v in bb.groupby(["super_class", "cell_type", "side"])}
     for key, mi in mm.groupby(["super_class", "cell_type", "side"], dropna=False).groups.items():
@@ -96,12 +111,14 @@ def bridge(b: pd.DataFrame, m: pd.DataFrame) -> Bridge:
     return Bridge(np.array(fused, dtype=np.int64).reshape(-1, 2), np.array(sorted(unpaired), dtype=np.int64))
 
 
-def build(min_synapses: int = 5) -> tuple[Network, pd.DataFrame]:
-    nb_net = banc.build(min_synapses)
+def build(min_synapses: int = 5, brain: str = "banc") -> tuple[Network, pd.DataFrame]:
+    mod = BRAINS[brain]
+    nb_net = mod.build(min_synapses)
     nm_net = manc.build(min_synapses)
-    b = banc.load_neurons().set_index("root_id").reindex(nb_net.root_ids).reset_index()
-    m = transfer_annotations(manc.load_neurons(), b).set_index("root_id").reindex(nm_net.root_ids).reset_index()
-    keep_b = ~vnc_resident(b)
+    b = mod.load_neurons().set_index("root_id").reindex(nb_net.root_ids).reset_index()
+    ref = b if brain == "banc" else banc.load_neurons()     # annotations d'organe des afférents : toujours le BANC
+    m = transfer_annotations(manc.load_neurons(), ref).set_index("root_id").reindex(nm_net.root_ids).reset_index()
+    keep_b = ~vnc_resident(b) if brain == "banc" else np.ones(len(b), dtype=bool)
     br = bridge(b, m)
 
     # indices de noeuds : BANC conservés d'abord (ordre BANC), puis neurones MANC non fusionnés
@@ -126,7 +143,7 @@ def build(min_synapses: int = 5) -> tuple[Network, pd.DataFrame]:
 
     cols_b = [c for c in COLUMNS if c in b.columns]
     nb_tab = b.loc[keep_b, cols_b].copy()
-    nb_tab["source"] = "banc"
+    nb_tab["source"] = brain
     nb_tab["manc_id"] = -1
     nb_tab.loc[nb_tab.index[node_b[br.fused[:, 0]]], "manc_id"] = m.root_id.to_numpy()[br.fused[:, 1]]
     nb_tab.loc[nb_tab.index[node_b[br.fused[:, 0]]], "source"] = "fused"
@@ -145,11 +162,12 @@ def build(min_synapses: int = 5) -> tuple[Network, pd.DataFrame]:
     return net, neurons
 
 
-def load(min_synapses: int = 5) -> tuple[Network, pd.DataFrame]:
-    if min_synapses == 5 and NETWORK_FILE.exists() and NEURONS_FILE.exists():
-        return Network.load(NETWORK_FILE), pd.read_csv(NEURONS_FILE, low_memory=False)
-    net, neurons = build(min_synapses)
+def load(min_synapses: int = 5, brain: str = "banc") -> tuple[Network, pd.DataFrame]:
+    nf, tf = network_file(brain), neurons_file(brain)
+    if min_synapses == 5 and nf.exists() and tf.exists():
+        return Network.load(nf), pd.read_csv(tf, low_memory=False)
+    net, neurons = build(min_synapses, brain)
     if min_synapses == 5:
-        net.save(NETWORK_FILE)
-        neurons.to_csv(NEURONS_FILE, index=False)
+        net.save(nf)
+        neurons.to_csv(tf, index=False)
     return net, neurons
