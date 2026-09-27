@@ -74,13 +74,20 @@ class SimResult:
 
 class LIFNetwork:
     def __init__(self, W: sp.csc_matrix, params: LIFParams | None = None, seed: int = 0,
-                 std_U: np.ndarray | None = None, size: np.ndarray | None = None):
+                 std_U: np.ndarray | None = None, size: np.ndarray | None = None,
+                 v_rest: np.ndarray | None = None, gain: np.ndarray | None = None):
         # W[post, pre] en synapses signées ; on la garde en CSC pour extraire vite les colonnes des
         # neurones qui ont tiré (W[:, spiking] @ 1). `std_U` : fraction de ressources libérée par spike,
         # par neurone présynaptique (remplace le scalaire params.std_U ; 0 = pas de dépression).
         # `size` : taille relative par neurone postsynaptique (volume / V_REF), requise si size_norm > 0.
+        # `v_rest` : potentiel de repos par neurone (mV), remplace le scalaire params.v_rest là où il est mesuré
+        # (classes de motoneurones de patte, flywire_sim.body.motor_units).
+        # `gain` : résistance d'entrée relative par neurone postsynaptique (1 = inchangé) ; multiplie ses entrées.
         self.p = params or LIFParams()
         self.n = W.shape[0]
+        self.v_rest = (np.float32(self.p.v_rest) if v_rest is None
+                       else np.asarray(v_rest, dtype=np.float32))
+        assert np.ndim(self.v_rest) == 0 or self.v_rest.shape == (self.n,)
         self.std_U = (np.full(self.n, self.p.std_U, dtype=np.float32) if std_U is None
                       else np.asarray(std_U, dtype=np.float32))
         assert self.std_U.shape == (self.n,)
@@ -91,6 +98,10 @@ class LIFNetwork:
             size = np.asarray(size, dtype=np.float64)
             assert size.shape == (self.n,) and (size > 0).all()
             W = sp.diags((size ** -self.p.size_norm).astype(np.float32)) @ W
+        if gain is not None:
+            gain = np.asarray(gain, dtype=np.float64)
+            assert gain.shape == (self.n,) and (gain > 0).all()
+            W = sp.diags(gain.astype(np.float32)) @ W
         self.W = W.tocsc()
         self.rng = np.random.default_rng(seed)
 
@@ -161,7 +172,8 @@ class LIFStepper:
         self.gain = np.float32(1.0 - self.decay_m)
         self.delay_steps = max(1, round(p.t_delay / dt))
         self.refr_steps = round(p.t_refractory / dt)
-        self.v = np.full(n, p.v_rest, dtype=np.float32)
+        self.v_rest = net.v_rest
+        self.v = np.broadcast_to(self.v_rest, (n,)).astype(np.float32).copy()
         self.g = np.zeros(n, dtype=np.float32)
         self.a = np.zeros(n, dtype=np.float32)          # adaptation (mV)
         self.decay_a = np.float32(np.exp(-dt / p.tau_adapt))
@@ -196,7 +208,7 @@ class LIFStepper:
                 g[hit] += np.asarray(amp, dtype=np.float32)
 
         # 3) intégration exacte sur un pas : v relaxe vers v_rest + g
-        v += (p.v_rest + g - a - v) * self.gain
+        v += (self.v_rest + g - a - v) * self.gain
         g *= self.decay_s
         if p.adapt_b:
             a *= self.decay_a

@@ -43,27 +43,31 @@ LEG_RADIUS = {"coxa": 0.06, "trochanterfemur": 0.055, "tibia": 0.04, "tarsus1": 
 
 # Muscles de patte (atlas BANC/FANC `Primary Cell Type` des motoneurones) -> (articulation, axe, signe).
 # Le signe donne le sens du couple pour +1 d'activation ; « ~side » : inversé pour les pattes droites.
-# Couple max en µN·mm (ordre de grandeur : poids du corps 9.8 µN x bras de levier 0.5 mm / 3 pattes ~ 1.6 ;
-# on donne 3-6 aux muscles principaux, 1-2 aux accessoires) — hypothèses à calibrer.
+# Couple max en µN·mm par actionneur = somme des couples tétaniques des unités motrices MANC du pool
+# (moyenne des six pattes), d'après la loi volume -> force par spike ajustée sur Azevedo 2020
+# (flywire_sim/body/motor_units.py, scripts/motor_units_report.py, docs/calibration.md § 10). Repère : poids du
+# corps 9,8 µN x bras de levier 0,5 mm / 3 pattes ~ 1,6 µN·mm ; pool fléchisseur du tibia (principal + accessoire)
+# ~54 µN·mm = 103 µN au bout du tibia (Azevedo 2020, Fig. 1). `ctrl` ∈ [0, 1] = fraction de ce couple.
 LEG_MUSCLES = {
-    "sternal_anterior_rotator":     ("coxa", "pitch", -1, 3.0),
-    "tergopleural_promotor":        ("coxa", "pitch", -1, 3.0),
-    "sternal_posterior_rotator":    ("coxa", "pitch", +1, 3.0),
-    "pleural_remotor_abductor":     ("coxa", "pitch", +1, 2.0),
-    "sternal_adductor":             ("coxa", "yaw", "~side", 2.0),
-    "trochanter_flexor":            ("trochanterfemur", "pitch", -1, 6.0),
-    "accessory_trochanter_flexor":  ("trochanterfemur", "pitch", -1, 2.0),
-    "trochanter_extensor":          ("trochanterfemur", "pitch", +1, 4.0),
-    "sternotrochanter":             ("trochanterfemur", "pitch", +1, 3.0),
-    "tergotrochanter":              ("trochanterfemur", "pitch", +1, 6.0),
-    "TTMn":                         ("trochanterfemur", "pitch", +1, 6.0),
-    "femur_reductor":               ("trochanterfemur", "roll", +1, 1.0),
-    "tibia_flexor":                 ("tibia", "pitch", +1, 6.0),
-    "accessory_tibia_flexor":       ("tibia", "pitch", +1, 2.0),
-    "tibia_extensor":               ("tibia", "pitch", -1, 4.0),
-    "tarsus_depressor":             ("tarsus1", "pitch", -1, 1.5),
-    "tarsus_levator":               ("tarsus1", "pitch", +1, 1.0),
-    "long_tendon_muscle":           ("tarsus1", "pitch", -1, 1.0),   # + adhésion (griffes/pulvilles), voir muscles.py
+    # muscle (Primary Cell Type MANC/BANC)  : (segment, axe, sens, couple max µN·mm)
+    "sternal_anterior_rotator":     ("coxa", "pitch", -1, 26.0),
+    "tergopleural_promotor":        ("coxa", "pitch", -1, 33.9),
+    "sternal_posterior_rotator":    ("coxa", "pitch", +1, 28.9),
+    "pleural_remotor_abductor":     ("coxa", "pitch", +1, 16.6),
+    "sternal_adductor":             ("coxa", "yaw", "~side", 2.9),
+    "trochanter_flexor":            ("trochanterfemur", "pitch", -1, 19.3),
+    "accessory_trochanter_flexor":  ("trochanterfemur", "pitch", -1, 5.7),
+    "trochanter_extensor":          ("trochanterfemur", "pitch", +1, 15.2),
+    "sternotrochanter":             ("trochanterfemur", "pitch", +1, 26.9),
+    "tergotrochanter":              ("trochanterfemur", "pitch", +1, 7.8),
+    "TTMn":                         ("trochanterfemur", "pitch", +1, 7.8),
+    "femur_reductor":               ("trochanterfemur", "roll", +1, 13.3),
+    "tibia_flexor":                 ("tibia", "pitch", +1, 26.9),
+    "accessory_tibia_flexor":       ("tibia", "pitch", +1, 26.6),
+    "tibia_extensor":               ("tibia", "pitch", -1, 30.7),
+    "tarsus_depressor":             ("tarsus1", "pitch", -1, 6.0),
+    "tarsus_levator":               ("tarsus1", "pitch", +1, 3.4),
+    "long_tendon_muscle":           ("tarsus1", "pitch", -1, 28.7),
 }
 
 

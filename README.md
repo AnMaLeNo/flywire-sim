@@ -117,9 +117,11 @@ Conception détaillée dans `docs/conception_corps.md`. En résumé :
   adhésion tarsale, capteurs, collisions), **sans ailes** ; formes, masses et positions d'articulations
   issues d'un **scan micro-CT** d'une femelle adulte (maillages NeuroMechFly, Apache-2.0,
   `body/meshes/`). Unités mm/g/s, pas de 0,1 ms.
-- **Muscles** (`body/muscles.py`) : 330 des 396 motoneurones de patte du MANC sont reliés chacun à
-  l'actionneur portant le nom de leur muscle (66 n'ont pas de muscle nommé dans l'export) ; chaque spike
-  produit une secousse (twitch).
+- **Muscles** (`body/muscles.py`, `body/motor_units.py`) : 330 des 396 motoneurones de patte du MANC sont
+  reliés chacun à l'actionneur portant le nom de leur muscle (66 n'ont pas de muscle nommé dans l'export).
+  Chaque MN est une unité motrice dont la classe (lent / intermédiaire / rapide), la force par spike, la
+  saturation, la cinétique de secousse, le potentiel de repos et la résistance d'entrée dérivent de son
+  volume officiel, par des lois ajustées sur les mesures d'Azevedo et al. 2020 (`docs/calibration.md` § 10).
 - **Sens** (`body/senses.py`) : angles, vitesses, charge et contacts des pattes → 3 650 neurones
   sensoriels de patte du MANC (hair plates, organes chordotonaux claw/hook/club, campaniformes,
   soies tactiles, soies gustatives) en spikes Poisson ; les sens de la tête sont ceux du cerveau choisi

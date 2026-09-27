@@ -45,12 +45,12 @@ for k in range(n):
         for mu in SWING:
             a = aid(f"{leg}_{mu}")
             if a >= 0:
-                d.ctrl[a] = 0.8 if swing else 0.0
+                d.ctrl[a] = 0.16 if swing else 0.0   # fraction du couple max du pool (LEG_MUSCLES)
         for mu in STANCE:
             a = aid(f"{leg}_{mu}")
             if a >= 0:
-                d.ctrl[a] = 0.0 if swing else 0.6
-        d.ctrl[aid(f"{leg}_adhesion")] = 0.0 if swing else 1.0
+                d.ctrl[a] = 0.0 if swing else 0.12
+        d.ctrl[aid(f"{leg}_adhesion")] = 0.0 if swing else 0.3
     mujoco.mj_step(m, d)
     if r is not None and k % 200 == 0:   # 50 images/s
         r.update_scene(d, camera="side")
